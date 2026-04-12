@@ -17,27 +17,36 @@ WEBUI_PORT  ?= 8080
 MESSAGE     ?= My internet has been dropping every night for a week
 
 # ── Phony targets ──────────────────────────────────────────────────────────────
-.PHONY: help install env serve webui test test-v example clean
+.PHONY: help install install-examples env serve webui test test-v example \
+        example-anthropic example-openai example-langchain example-langgraph clean
 
 # ── Help ───────────────────────────────────────────────────────────────────────
 help:
 	@echo ""
 	@echo "SkillfulMCP — available targets"
 	@echo ""
-	@echo "  make install       Install the package and dev dependencies"
-	@echo "  make env           Copy .env.example → .env (skip if .env exists)"
-	@echo "  make serve         Start the MCP server  (localhost:$(MCP_PORT))"
-	@echo "  make webui         Start the Web UI      (localhost:$(WEBUI_PORT))"
-	@echo "  make test          Run the test suite"
-	@echo "  make test-v        Run the test suite (verbose)"
-	@echo "  make example       Run the multi-agent example network"
-	@echo "                       MESSAGE=\"...\" to change the user prompt"
-	@echo "  make clean         Remove build artefacts and temp files"
+	@echo "  make install           Install the package and dev dependencies"
+	@echo "  make install-examples  Also install deps for the framework examples"
+	@echo "  make env               Copy .env.example → .env (skip if .env exists)"
+	@echo "  make serve             Start the MCP server (localhost:$(MCP_PORT))"
+	@echo "  make webui             Start the Web UI     (localhost:$(WEBUI_PORT))"
+	@echo "  make test              Run the test suite"
+	@echo "  make test-v            Run the test suite (verbose)"
+	@echo "  make example           Default example network (Anthropic SDK)"
+	@echo "  make example-anthropic Same as above (explicit)"
+	@echo "  make example-openai    OpenAI SDK runner"
+	@echo "  make example-langchain LangChain runner"
+	@echo "  make example-langgraph LangGraph runner"
+	@echo "                         MESSAGE=\"...\" to change the user prompt"
+	@echo "  make clean             Remove build artefacts and temp files"
 	@echo ""
 
 # ── Install ────────────────────────────────────────────────────────────────────
 install:
 	$(PYTHON) -m pip install -e ".[dev]"
+
+install-examples:
+	$(PYTHON) -m pip install -e ".[dev,examples]"
 
 # ── Environment ────────────────────────────────────────────────────────────────
 env:
@@ -64,9 +73,20 @@ test:
 test-v:
 	$(PYTEST) -v
 
-# ── Example ────────────────────────────────────────────────────────────────────
-example:
-	$(PYTHON) example/run_network.py --message "$(MESSAGE)"
+# ── Examples ───────────────────────────────────────────────────────────────────
+example: example-anthropic
+
+example-anthropic:
+	$(PYTHON) -m example.anthropic_sdk.run_network --message "$(MESSAGE)"
+
+example-openai:
+	$(PYTHON) -m example.openai_sdk.run_network --message "$(MESSAGE)"
+
+example-langchain:
+	$(PYTHON) -m example.langchain_app.run_network --message "$(MESSAGE)"
+
+example-langgraph:
+	$(PYTHON) -m example.langgraph_app.run_network --message "$(MESSAGE)"
 
 # ── Clean ──────────────────────────────────────────────────────────────────────
 clean:
