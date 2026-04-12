@@ -23,6 +23,7 @@ from ..bundles import (
     MAX_BUNDLE_BYTES,
     BundleError,
     build_targz,
+    copy_bundle,
     delete_bundle,
     extract_archive,
     get_file,
@@ -87,6 +88,29 @@ async def upload_bundle(
     except BundleError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     stats = store_bundle(db, skill.pk, files)
+    return BundleUploadResponse(file_count=stats.file_count, total_size=stats.total_size)
+
+
+@router.post(
+    "/{skill_id}/versions/{version}/bundle/copy-from/{src_skill_id}/{src_version}",
+    response_model=BundleUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def copy_bundle_endpoint(
+    skill_id: str,
+    version: str,
+    src_skill_id: str,
+    src_version: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """Replace the bundle at `(skill_id, version)` with a copy of the bundle at
+    `(src_skill_id, src_version)`. Supports same-skill (new version from an
+    existing one) and cross-skill (clone-into-new-skill) flows.
+    """
+    dst = _require_skill(db, skill_id, version)
+    src = _require_skill(db, src_skill_id, src_version)
+    stats = copy_bundle(db, src.pk, dst.pk)
     return BundleUploadResponse(file_count=stats.file_count, total_size=stats.total_size)
 
 

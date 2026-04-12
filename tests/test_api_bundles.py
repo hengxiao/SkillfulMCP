@@ -200,6 +200,64 @@ class TestDownloadBundle:
 # DELETE /skills/{id}/versions/{ver}/bundle (admin)
 # ---------------------------------------------------------------------------
 
+class TestCopyBundle:
+    def test_copy_same_skill_different_version(self, client):
+        make_skill(client, id="skill-a", version="1.0.0")
+        make_skill(client, id="skill-a", version="2.0.0")
+        _upload(
+            client, "skill-a", "1.0.0",
+            _zip_bytes({"SKILL.md": b"hi", "x/y.txt": b"bye"}),
+            "b.zip",
+        )
+        r = client.post(
+            "/skills/skill-a/versions/2.0.0/bundle/copy-from/skill-a/1.0.0",
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 201
+        body = r.json()
+        assert body["file_count"] == 2
+
+        headers = _agent_headers(client, skills=["skill-a"])
+        listing = client.get("/skills/skill-a/versions/2.0.0/files", headers=headers).json()
+        assert sorted(f["path"] for f in listing) == ["SKILL.md", "x/y.txt"]
+
+    def test_copy_across_skills_clone(self, client):
+        """Cross-skill copy: used by the clone-skill flow."""
+        make_skill(client, id="skill-src", version="1.0.0")
+        make_skill(client, id="skill-clone", version="1.0.0")
+        _upload(
+            client, "skill-src", "1.0.0",
+            _zip_bytes({"SKILL.md": b"hi"}),
+            "b.zip",
+        )
+        r = client.post(
+            "/skills/skill-clone/versions/1.0.0/bundle/copy-from/skill-src/1.0.0",
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 201
+        headers = _agent_headers(client, skills=["skill-clone"])
+        listing = client.get(
+            "/skills/skill-clone/versions/1.0.0/files", headers=headers
+        ).json()
+        assert [f["path"] for f in listing] == ["SKILL.md"]
+
+    def test_copy_requires_admin(self, client):
+        make_skill(client, id="skill-a", version="1.0.0")
+        make_skill(client, id="skill-a", version="2.0.0")
+        r = client.post(
+            "/skills/skill-a/versions/2.0.0/bundle/copy-from/skill-a/1.0.0"
+        )
+        assert r.status_code == 403
+
+    def test_copy_unknown_src_404(self, client):
+        make_skill(client, id="skill-a", version="2.0.0")
+        r = client.post(
+            "/skills/skill-a/versions/2.0.0/bundle/copy-from/skill-a/9.9.9",
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 404
+
+
 class TestDeleteBundle:
     def test_delete_empties_bundle(self, client):
         make_skill(client, id="skill-a", version="1.0.0")

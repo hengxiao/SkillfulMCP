@@ -12,6 +12,7 @@ from mcp_server.bundles import (
     BundleFile,
     MAX_BUNDLE_BYTES,
     build_targz,
+    copy_bundle,
     detect_format,
     extract_archive,
     list_bundle,
@@ -190,6 +191,34 @@ class TestStore:
         store_bundle(db_session, skill.pk, [BundleFile("new", b"2")])
         listed = list_bundle(db_session, skill.pk)
         assert [f.path for f in listed] == ["new"]
+
+    def test_copy_bundle_between_versions(self, db_session):
+        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={})
+        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={})
+        db_session.add_all([src, dst])
+        db_session.commit()
+        db_session.refresh(src)
+        db_session.refresh(dst)
+        store_bundle(db_session, src.pk, [BundleFile("SKILL.md", b"hi"), BundleFile("x/y.txt", b"bye")])
+        stats = copy_bundle(db_session, src.pk, dst.pk)
+        assert stats.file_count == 2
+        dst_files = list_bundle(db_session, dst.pk)
+        assert sorted(f.path for f in dst_files) == ["SKILL.md", "x/y.txt"]
+        src_files = list_bundle(db_session, src.pk)
+        # Source is untouched
+        assert sorted(f.path for f in src_files) == ["SKILL.md", "x/y.txt"]
+
+    def test_copy_bundle_replaces_existing(self, db_session):
+        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={})
+        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={})
+        db_session.add_all([src, dst])
+        db_session.commit()
+        db_session.refresh(src); db_session.refresh(dst)
+        store_bundle(db_session, src.pk, [BundleFile("new.txt", b"new")])
+        store_bundle(db_session, dst.pk, [BundleFile("old.txt", b"old")])
+        copy_bundle(db_session, src.pk, dst.pk)
+        paths = [f.path for f in list_bundle(db_session, dst.pk)]
+        assert paths == ["new.txt"]
 
     def test_build_targz(self, db_session):
         skill = _persist_skill(db_session)

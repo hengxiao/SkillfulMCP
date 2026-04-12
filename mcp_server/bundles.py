@@ -252,6 +252,30 @@ def delete_bundle(db: Session, skill_pk: int) -> int:
     return n
 
 
+def copy_bundle(db: Session, src_skill_pk: int, dst_skill_pk: int) -> BundleStats:
+    """Replace the bundle at dst with a copy of the bundle at src.
+
+    Used when a new skill version is created from an existing one and the user
+    wants to inherit the bundle rather than re-upload it.
+    """
+    db.query(SkillFile).filter(SkillFile.skill_pk == dst_skill_pk).delete()
+    rows = db.query(SkillFile).filter(SkillFile.skill_pk == src_skill_pk).all()
+    total = 0
+    for r in rows:
+        db.add(
+            SkillFile(
+                skill_pk=dst_skill_pk,
+                path=r.path,
+                content=r.content,
+                size=r.size,
+                sha256=r.sha256,
+            )
+        )
+        total += r.size
+    db.commit()
+    return BundleStats(file_count=len(rows), total_size=total)
+
+
 def build_targz(db: Session, skill_pk: int) -> bytes:
     """Rebuild a canonical .tar.gz for downloading the whole bundle."""
     rows = (
