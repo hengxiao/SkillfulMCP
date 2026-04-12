@@ -1,0 +1,217 @@
+# ---------------------------------------------------------------------------
+# SkillfulMCP — Agentic Network Definition
+#
+# This file fully describes the agentic network:
+#   - what skillsets and skills exist in the MCP catalog
+#   - which agents exist, what skillsets they hold, and how they behave
+#
+# The Python runner (run_network.py) bootstraps the MCP server from this
+# definition, then instantiates the agents and drives the conversation.
+#
+# To try it:
+#   1. Start the MCP server:
+#        MCP_JWT_SECRET=example-secret MCP_ADMIN_KEY=admin-key mcp-server
+#   2. Run the example:
+#        MCP_ADMIN_KEY=admin-key python example/run_network.py \
+#            --message "I have a billing question about invoice #1234"
+# ---------------------------------------------------------------------------
+
+network:
+  name: "Customer Support Network"
+  description: >
+    Multi-agent customer support system.  An orchestrator classifies the
+    customer's intent and delegates to a specialist worker agent (billing or
+    technical support).
+  mcp_server_url: "http://localhost:8000"
+
+# ---------------------------------------------------------------------------
+# Catalog bootstrap — skillsets and their skills
+# ---------------------------------------------------------------------------
+
+skillsets:
+  - id: "routing"
+    name: "Routing Skills"
+    description: "Intent classification and request routing"
+    skills:
+      - id: "classify-intent"
+        name: "Classify Intent"
+        version: "1.0.0"
+        description: >
+          Classifies a customer message into one of several intent categories
+          (billing, technical-support, account, general).
+        metadata:
+          input_schema:
+            type: object
+            properties:
+              message:
+                type: string
+                description: "The customer's raw message"
+            required: ["message"]
+          output_schema:
+            type: object
+            properties:
+              intent:
+                type: string
+                enum: ["billing", "technical-support", "account", "general"]
+              confidence:
+                type: number
+                description: "Confidence score between 0 and 1"
+
+  - id: "billing"
+    name: "Billing Skills"
+    description: "Invoice lookup and account credit management"
+    skills:
+      - id: "lookup-invoice"
+        name: "Lookup Invoice"
+        version: "1.0.0"
+        description: "Retrieves invoice details for a customer account."
+        metadata:
+          input_schema:
+            type: object
+            properties:
+              customer_id:
+                type: string
+                description: "Customer account identifier"
+              invoice_id:
+                type: string
+                description: "Invoice identifier (optional — returns all if omitted)"
+            required: ["customer_id"]
+          output_schema:
+            type: object
+            properties:
+              invoices:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    invoice_id: {type: string}
+                    amount: {type: number}
+                    status: {type: string, enum: ["paid", "pending", "overdue"]}
+                    date: {type: string}
+
+      - id: "apply-credit"
+        name: "Apply Credit"
+        version: "1.0.0"
+        description: "Applies a credit adjustment to a customer account."
+        metadata:
+          input_schema:
+            type: object
+            properties:
+              customer_id:
+                type: string
+              amount:
+                type: number
+                description: "Credit amount in account currency"
+              reason:
+                type: string
+                description: "Reason for the credit (for audit log)"
+            required: ["customer_id", "amount"]
+
+  - id: "technical-support"
+    name: "Technical Support Skills"
+    description: "Service diagnostics and troubleshooting tools"
+    skills:
+      - id: "run-diagnostic"
+        name: "Run Diagnostic"
+        version: "1.0.0"
+        description: >
+          Runs a diagnostic check on a customer's service and returns
+          a status report with any identified issues and recommendations.
+        metadata:
+          input_schema:
+            type: object
+            properties:
+              customer_id:
+                type: string
+              service_type:
+                type: string
+                enum: ["internet", "phone", "tv"]
+                description: "Which service to diagnose"
+            required: ["customer_id", "service_type"]
+          output_schema:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: ["ok", "degraded", "outage"]
+              issues:
+                type: array
+                items: {type: string}
+              recommendation:
+                type: string
+
+      - id: "schedule-technician"
+        name: "Schedule Technician"
+        version: "1.0.0"
+        description: "Schedules an on-site technician visit for a customer."
+        metadata:
+          input_schema:
+            type: object
+            properties:
+              customer_id:
+                type: string
+              preferred_date:
+                type: string
+                description: "ISO 8601 date string (e.g. 2026-04-15)"
+              issue_description:
+                type: string
+            required: ["customer_id", "preferred_date"]
+
+# ---------------------------------------------------------------------------
+# Agent definitions
+# ---------------------------------------------------------------------------
+
+agents:
+  - id: "intent-router"
+    name: "Intent Router"
+    skillsets: ["routing"]
+    scope: ["read", "execute"]
+    role: "orchestrator"
+    model: "claude-sonnet-4-6"
+    system_prompt: |
+      You are an intelligent intent router for a customer support system.
+
+      Your job:
+      1. Use the classify_intent skill to identify what the customer needs.
+      2. Based on the intent, choose the right specialist:
+           - "billing"           → route to billing-agent
+           - "technical-support" → route to tech-support-agent
+           - "account"           → route to billing-agent (handles account questions)
+           - "general"           → answer directly without routing
+
+      After classifying, call the route_to_agent tool with the chosen agent id
+      and a concise summary of the customer's request.
+
+      Always be polite and professional.
+
+  - id: "billing-agent"
+    name: "Billing Specialist"
+    skillsets: ["billing"]
+    scope: ["read", "execute"]
+    role: "worker"
+    model: "claude-sonnet-4-6"
+    system_prompt: |
+      You are a billing specialist for a customer support platform.
+
+      Use the available skills to help customers with:
+      - Invoice lookups (lookup_invoice)
+      - Account credits (apply_credit)
+
+      Always confirm the customer_id before taking any action that modifies
+      their account. Be concise and clear in your responses.
+
+  - id: "tech-support-agent"
+    name: "Technical Support Specialist"
+    skillsets: ["technical-support"]
+    scope: ["read", "execute"]
+    role: "worker"
+    model: "claude-sonnet-4-6"
+    system_prompt: |
+      You are a technical support specialist for a customer support platform.
+
+      Use the available skills to:
+      - Run service diagnostics (run_diagnostic)
+      - Schedule technician visits when remote resolution is not possible (schedule_technician)
+
+      Prefer remote resolution. Only schedule a technician if diagnostics
+      confirm a hardware or line issue.
