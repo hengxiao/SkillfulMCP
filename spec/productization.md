@@ -211,10 +211,12 @@ order.
 - **[P0] Request size and rate limits.** Per-tenant token bucket in Redis;
   return `429` with `Retry-After`. Global request-body size limit enforced
   at the load balancer.
-- **[P0] Typed errors.** Consistent error schema
-  `{code, message, detail, request_id}` with stable `code` values; catch
-  `HTTPException` centrally, scrub internals before rendering. Surface
-  `request_id` in logs and the response.
+- **[P0 — partially SHIPPED] Typed errors.** `mcp_server/errors.py` wraps
+  every response in `{detail, code, request_id}`. Backwards-compatible —
+  the legacy `detail` field is preserved. 500s are scrubbed to a generic
+  `"Internal Server Error"` message. Remaining work: per-endpoint stable
+  `code` values beyond `HTTP_<status>`, dropping `detail` in a future
+  `/v1/` surface, and Sentry-style error tracking.
 - **[P1] ETags and conditional requests** on skill and skillset reads.
   `If-None-Match` returns 304. Cuts agent poll traffic sharply.
 - **[P1] Batch endpoints** (e.g. `GET /v1/skills?ids=a,b,c`) so the
@@ -253,11 +255,15 @@ order.
 
 ### 3.6 Observability
 
-- **[P0] Structured logging.** Replace `print` with `structlog` (or
-  Python's `logging` configured for JSON). Every log line carries
-  `request_id`, `tenant_id`, `operator_id` / `agent_id`, `route`.
-- **[P0] Request IDs.** Middleware generates / propagates an
-  `X-Request-ID`; included in all logs and error responses.
+- **[P0 — SHIPPED] Structured logging.** `mcp_server/logging_config.py`
+  provides a stdlib JSON formatter with request-id context injection.
+  Every log line carries `ts`, `level`, `logger`, `msg`, `request_id`,
+  plus caller-supplied `extra={}` fields. Tenant / operator / agent
+  context lands when multi-tenancy does.
+- **[P0 — SHIPPED] Request IDs.** `mcp_server/middleware.RequestIDMiddleware`
+  reads or generates `X-Request-ID`, sets a `ContextVar`, emits one
+  access log per request with latency, and echoes the header on the
+  response. The typed error envelope embeds `request_id`.
 - **[P0] OpenTelemetry instrumentation.** Autowire FastAPI, SQLAlchemy,
   httpx, Anthropic, OpenAI. Export OTLP to a collector; deployer picks
   the backend (Datadog, Grafana Cloud, Honeycomb, etc.).
@@ -266,9 +272,10 @@ order.
     `bundle_upload_bytes`, `bundle_upload_latency_ms`.
   - Auth: `token_mint_total`, `token_validate_fail_total{reason=}`.
   - Agents (SDK-side): `skill_fetch_fail_total`, `tool_call_latency_ms`.
-- **[P0] Health checks.** `/livez` (process alive) and `/readyz`
-  (DB reachable, JWT secret loaded, bundle store reachable). Kubernetes
-  probes map to these.
+- **[P0 — SHIPPED] Health checks.** `/livez` returns 200 as long as the
+  worker responds (no deps). `/readyz` runs `SELECT 1` through the normal
+  DB session and checks `settings.jwt_secret` is non-empty; returns 503
+  + per-component status on failure. Legacy `/health` kept as alias.
 - **[P1] Real tracing of agent runs.** Each `agent.run(message)` is a
   trace; each tool call a child span; the catalog's response shows up on
   the same trace via OTel propagation.

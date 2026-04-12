@@ -19,6 +19,9 @@ These are implementation-level docs; the high-level design lives in
 | `catalog.py`                  | [catalog.md](catalog.md)                                | Skill + skillset CRUD and membership                         |
 | `registry.py`                 | [registry.md](registry.md)                              | Agent CRUD                                                   |
 | `bundles.py`                  | [bundles.md](bundles.md)                                | Archive extraction + bundle storage                          |
+| `logging_config.py`           | [logging_config.md](logging_config.md)                  | JSON formatter + request-id context                          |
+| `middleware.py`               | [middleware.md](middleware.md)                          | Request-ID middleware (access log + context propagation)     |
+| `errors.py`                   | [errors.md](errors.md)                                  | Global exception handlers + typed error envelope             |
 | `routers/`                    | [routers/README.md](routers/README.md)                  | HTTP route modules (one per resource)                        |
 
 ## Conventions used across the module
