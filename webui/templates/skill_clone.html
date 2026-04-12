@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Clone {{ source.id }} — Skills — SkillfulMCP{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/skills">Skills</a></li>
+    <li class="breadcrumb-item">
+      <a href="/skills/{{ source.id }}?version={{ source.version }}">{{ source.id }}</a>
+    </li>
+    <li class="breadcrumb-item active">clone</li>
+  </ol>
+</nav>
+
+<h2 class="mb-1 fw-bold">
+  <i class="bi bi-files text-primary me-2"></i>Clone <code>{{ source.id }}</code>
+</h2>
+<p class="text-muted">
+  Create a new skill prefilled from <code>{{ source.id }}</code>
+  <span class="badge bg-success badge-mono">v{{ source.version }}</span>.
+  The new skill starts with no skillset memberships.
+</p>
+
+<form method="post"
+      action="/skills/{{ source.id }}/clone"
+      enctype="multipart/form-data"
+      class="card border-0 shadow-sm">
+  <input type="hidden" name="from_version" value="{{ source.version }}">
+  <div class="card-body">
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">New skill ID <span class="text-danger">*</span></label>
+        <input type="text" name="new_id" class="form-control font-monospace"
+               placeholder="e.g. {{ source.id }}-v2" required
+               pattern="[a-zA-Z0-9_\-]+"
+               title="Letters, numbers, hyphens, underscores only"
+               autofocus>
+        <div class="form-text">Must not match an existing skill id.</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+        <input type="text" name="new_name" class="form-control"
+               value="{{ source.name }}" required>
+        <div class="form-text">Free to rename here; immutable after creation.</div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Starting version <span class="text-danger">*</span></label>
+        <input type="text" name="version" class="form-control font-monospace"
+               value="{{ source.version }}" required pattern="\d+\.\d+\.\d+.*">
+      </div>
+      <div class="col-md-8">
+        <label class="form-label fw-semibold">Description</label>
+        <input type="text" name="description" class="form-control"
+               value="{{ source.description or '' }}">
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <label class="form-label fw-semibold">Metadata <span class="text-muted fw-normal">(JSON)</span></label>
+      <textarea name="metadata" class="form-control metadata-area" rows="8">{{ metadata_json }}</textarea>
+    </div>
+
+    <fieldset class="mb-3">
+      <legend class="form-label fw-semibold fs-6">Bundle</legend>
+
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="bundle_action" id="ba-copy"
+               value="copy"
+               {% if src_bundle_file_count > 0 %}checked{% endif %}
+               {% if src_bundle_file_count == 0 %}disabled{% endif %}>
+        <label class="form-check-label" for="ba-copy">
+          <strong>Copy bundle from {{ source.id }} v{{ source.version }}</strong>
+          {% if src_bundle_file_count > 0 %}
+            <span class="text-muted">— inherit all {{ src_bundle_file_count }} files as-is</span>
+          {% else %}
+            <span class="text-muted">— source has no bundle</span>
+          {% endif %}
+        </label>
+      </div>
+
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="radio" name="bundle_action" id="ba-upload"
+               value="upload"
+               {% if src_bundle_file_count == 0 %}checked{% endif %}>
+        <label class="form-check-label" for="ba-upload">
+          <strong>Upload a new bundle</strong>
+          <span class="text-muted">— zip / tar / tar.gz / tar.bz2 / tar.xz, max 100 MB</span>
+        </label>
+        <div class="ms-4 mt-2" id="bundle-upload-input">
+          <input type="file" name="file" class="form-control form-control-sm"
+                 accept=".zip,.tar,.tar.gz,.tgz,.tar.bz2,.tbz2,.tar.xz,.txz,application/zip,application/gzip,application/x-tar">
+        </div>
+      </div>
+
+      <div class="form-check mt-2">
+        <input class="form-check-input" type="radio" name="bundle_action" id="ba-none" value="none">
+        <label class="form-check-label" for="ba-none">
+          <strong>No bundle</strong>
+          <span class="text-muted">— create the cloned skill with metadata only</span>
+        </label>
+      </div>
+    </fieldset>
+
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-end gap-2 py-3">
+    <a href="/skills/{{ source.id }}?version={{ source.version }}" class="btn btn-secondary">
+      Cancel
+    </a>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-files me-1"></i>Create clone
+    </button>
+  </div>
+</form>
+
+<script>
+  (function () {
+    const fileInput = document.querySelector('#bundle-upload-input input[type=file]');
+    const radios = document.querySelectorAll('input[name=bundle_action]');
+    function sync() {
+      const action = document.querySelector('input[name=bundle_action]:checked');
+      fileInput.required = action && action.value === 'upload';
+    }
+    radios.forEach(r => r.addEventListener('change', sync));
+    sync();
+  })();
+</script>
+{% endblock %}

@@ -4,27 +4,81 @@
 {% block content %}
 <div class="d-flex align-items-center justify-content-between mb-4">
   <h2 class="mb-0 fw-bold"><i class="bi bi-lightning me-2 text-success"></i>Skills</h2>
-  <span class="badge bg-secondary fs-6">{{ skills | length }}</span>
+  <span class="badge bg-secondary fs-6">
+    <span id="skill-visible-count">{{ skills | length }}</span> / {{ skills | length }}
+  </span>
+</div>
+
+<!-- Search + filter toolbar -->
+<div class="card border-0 shadow-sm mb-3">
+  <div class="card-body py-3">
+    <div class="row g-2 align-items-center">
+      <div class="col-md-5">
+        <label for="skill-search" class="visually-hidden">Search</label>
+        <div class="input-group input-group-sm">
+          <span class="input-group-text bg-white border-end-0">
+            <i class="bi bi-search text-muted"></i>
+          </span>
+          <input type="text" id="skill-search" class="form-control border-start-0"
+                 placeholder="Search id, name, or description…" autocomplete="off">
+          <button type="button" id="skill-search-clear" class="btn btn-outline-secondary"
+                  title="Clear search">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="col-md-7">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <span class="text-muted small">Skillsets:</span>
+          {% if skillsets %}
+            {% for ss in skillsets %}
+            <button type="button"
+                    class="btn btn-sm btn-outline-primary skillset-filter-pill"
+                    data-skillset-id="{{ ss.id }}"
+                    aria-pressed="false"
+                    title="{{ ss.name }}">
+              <i class="bi bi-funnel me-1"></i>{{ ss.id }}
+            </button>
+            {% endfor %}
+            <button type="button" id="skillset-filter-clear"
+                    class="btn btn-sm btn-link text-muted d-none">
+              clear
+            </button>
+          {% else %}
+            <span class="text-muted small fst-italic">no skillsets yet</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div id="skill-empty-hint" class="text-muted small mt-2 d-none">
+      <i class="bi bi-info-circle me-1"></i>No skills match the current filters.
+    </div>
+  </div>
 </div>
 
 <!-- Skills table -->
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-body p-0">
     {% if skills %}
-    <table class="table table-hover mb-0">
+    <table class="table table-hover mb-0" id="skills-table">
       <thead class="table-light">
         <tr>
           <th>ID</th>
           <th>Name</th>
           <th>Latest Version</th>
           <th>Description</th>
+          <th>Skillsets</th>
           <th>Updated</th>
           <th class="text-end">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for skill in skills %}
-        <tr class="row-clickable"
+        {% set membership = skill_membership.get(skill.id, []) %}
+        <tr class="row-clickable skill-row"
+            data-search="{{ (skill.id ~ ' ' ~ skill.name ~ ' ' ~ (skill.description or '')) | lower }}"
+            data-skillsets="{{ membership | join(',') }}"
             hx-get="/skills/{{ skill.id }}/modal"
             hx-target="#detail-modal-content"
             hx-trigger="click"
@@ -37,6 +91,15 @@
           </td>
           <td class="text-muted small" style="max-width:260px;">
             <span class="text-truncate d-block">{{ skill.description or '—' }}</span>
+          </td>
+          <td class="small">
+            {% if membership %}
+              {% for ss_id in membership %}
+              <span class="badge bg-light text-dark border me-1">{{ ss_id }}</span>
+              {% endfor %}
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
           </td>
           <td class="text-muted small">{{ skill.updated_at[:10] if skill.updated_at else '—' }}</td>
           <td class="text-end" onclick="event.stopPropagation()">
@@ -132,4 +195,75 @@
     </form>
   </div>
 </div>
+
+<script>
+  (function () {
+    const searchInput = document.getElementById('skill-search');
+    const searchClear = document.getElementById('skill-search-clear');
+    const filterPills = document.querySelectorAll('.skillset-filter-pill');
+    const filterClear = document.getElementById('skillset-filter-clear');
+    const rows = document.querySelectorAll('.skill-row');
+    const visibleCountEl = document.getElementById('skill-visible-count');
+    const emptyHint = document.getElementById('skill-empty-hint');
+    if (!searchInput || rows.length === 0) return;
+
+    const activeSkillsets = new Set();
+
+    function apply() {
+      const q = searchInput.value.trim().toLowerCase();
+      let visible = 0;
+      rows.forEach((row) => {
+        const haystack = row.getAttribute('data-search') || '';
+        const rowSkillsets = (row.getAttribute('data-skillsets') || '')
+          .split(',')
+          .filter(Boolean);
+        const matchesSearch = !q || haystack.includes(q);
+        const matchesSkillset =
+          activeSkillsets.size === 0 ||
+          rowSkillsets.some((id) => activeSkillsets.has(id));
+        const show = matchesSearch && matchesSkillset;
+        row.classList.toggle('d-none', !show);
+        if (show) visible++;
+      });
+      visibleCountEl.textContent = visible;
+      emptyHint.classList.toggle('d-none', visible > 0);
+      filterClear.classList.toggle('d-none', activeSkillsets.size === 0);
+    }
+
+    searchInput.addEventListener('input', apply);
+    searchClear.addEventListener('click', () => {
+      searchInput.value = '';
+      apply();
+      searchInput.focus();
+    });
+
+    filterPills.forEach((pill) => {
+      pill.addEventListener('click', (e) => {
+        e.preventDefault();
+        const id = pill.getAttribute('data-skillset-id');
+        if (activeSkillsets.has(id)) {
+          activeSkillsets.delete(id);
+          pill.classList.remove('btn-primary');
+          pill.classList.add('btn-outline-primary');
+          pill.setAttribute('aria-pressed', 'false');
+        } else {
+          activeSkillsets.add(id);
+          pill.classList.remove('btn-outline-primary');
+          pill.classList.add('btn-primary');
+          pill.setAttribute('aria-pressed', 'true');
+        }
+        apply();
+      });
+    });
+    filterClear.addEventListener('click', () => {
+      activeSkillsets.clear();
+      filterPills.forEach((p) => {
+        p.classList.remove('btn-primary');
+        p.classList.add('btn-outline-primary');
+        p.setAttribute('aria-pressed', 'false');
+      });
+      apply();
+    });
+  })();
+</script>
 {% endblock %}

@@ -141,6 +141,19 @@ class MCPClient:
             "DELETE", f"/skills/{skill_id}/versions/{version}/bundle"
         )
 
+    async def copy_bundle(
+        self,
+        dst_skill_id: str,
+        dst_version: str,
+        src_skill_id: str,
+        src_version: str,
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/skills/{dst_skill_id}/versions/{dst_version}"
+            f"/bundle/copy-from/{src_skill_id}/{src_version}",
+        )
+
     # ------------------------------------------------------------------
     # Agents (counts only — for dashboard)
     # ------------------------------------------------------------------

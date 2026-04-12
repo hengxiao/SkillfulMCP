@@ -40,7 +40,13 @@ def get_client() -> MCPClient:
 # ---------------------------------------------------------------------------
 
 def _redirect(path: str, msg: str = "", msg_type: str = "success") -> RedirectResponse:
-    url = f"{path}?msg={quote(msg)}&msg_type={msg_type}" if msg else path
+    if not msg:
+        return RedirectResponse(path, status_code=303)
+    # Preserve any existing query string in `path` instead of blindly appending
+    # "?msg=...", which would produce an illegal double-'?' URL like
+    # "/skills/pdf?version=1.0.0?msg=..." and confuse the next handler.
+    sep = "&" if "?" in path else "?"
+    url = f"{path}{sep}msg={quote(msg)}&msg_type={msg_type}"
     return RedirectResponse(url, status_code=303)
 
 
@@ -212,9 +218,18 @@ def create_app() -> FastAPI:
     @app.get("/skills", response_class=HTMLResponse)
     async def skills_page(request: Request, msg: str = "", msg_type: str = "success"):
         client = get_client()
+        skill_membership: dict[str, list[str]] = {}
         try:
             skills = await client.list_skills()
             skillsets = await client.list_skillsets()
+            # Build skill_id -> [skillset_ids] so the UI can filter by skillset.
+            for ss in skillsets:
+                try:
+                    members = await client.list_skillset_skills(ss["id"])
+                except MCPError:
+                    members = []
+                for m in members:
+                    skill_membership.setdefault(m["id"], []).append(ss["id"])
             error = None
         except MCPError as exc:
             skills, skillsets, error = [], [], str(exc)
@@ -222,6 +237,7 @@ def create_app() -> FastAPI:
             "active": "skills",
             "skills": skills,
             "skillsets": skillsets,
+            "skill_membership": skill_membership,
             "error": error,
             **_flash_ctx(msg, msg_type),
         })
@@ -325,58 +341,216 @@ def create_app() -> FastAPI:
             **_flash_ctx(msg, msg_type),
         })
 
-    @app.post("/skills/{skill_id}/update")
-    async def update_skill(
-        skill_id: str,
-        name: Annotated[str, Form()],
-        version: Annotated[str, Form()],
-        description: Annotated[str, Form()] = "",
-        metadata: Annotated[str, Form()] = "{}",
-    ):
-        try:
-            meta = json.loads(metadata)
-        except json.JSONDecodeError:
-            return _redirect(
-                f"/skills/{skill_id}?version={version}",
-                "metadata must be valid JSON.",
-                "error",
-            )
-        try:
-            await get_client().update_skill(
-                skill_id,
-                {"name": name, "description": description, "version": version, "metadata": meta},
-            )
-            return _redirect(
-                f"/skills/{skill_id}?version={version}", "Skill updated."
-            )
-        except MCPError as exc:
-            return _redirect(
-                f"/skills/{skill_id}?version={version}", str(exc), "error"
-            )
+    # ------------------------------------------------------------------ #
+    # Clone skill — create a brand-new skill id, prefilled from a source  #
+    # version. Used when a user wants to rename a skill (names are        #
+    # immutable within a skill id).                                       #
+    # ------------------------------------------------------------------ #
 
-    @app.post("/skills/{skill_id}/versions")
-    async def create_skill_version(
+    @app.get("/skills/{skill_id}/clone", response_class=HTMLResponse)
+    async def clone_page(
+        request: Request,
         skill_id: str,
+        from_: str | None = None,
+    ):
+        from_ = request.query_params.get("from") or from_
+        client = get_client()
+        try:
+            source = await client.get_skill(skill_id, version=from_)
+            try:
+                src_bundle_files = await client.list_bundle_files(
+                    skill_id, source["version"]
+                )
+            except MCPError:
+                src_bundle_files = []
+        except MCPError as exc:
+            return _redirect("/skills", str(exc), "error")
+        return _render(request, "skill_clone.html", {
+            "active": "skills",
+            "source": source,
+            "metadata_json": json.dumps(source.get("metadata") or {}, indent=2),
+            "src_bundle_file_count": len(src_bundle_files),
+            "error": None,
+            **_flash_ctx("", "success"),
+        })
+
+    @app.post("/skills/{skill_id}/clone")
+    async def clone_skill(
+        skill_id: str,
+        new_id: Annotated[str, Form()],
+        new_name: Annotated[str, Form()],
         version: Annotated[str, Form()],
-        name: Annotated[str, Form()],
+        from_version: Annotated[str, Form()],
+        bundle_action: Annotated[str, Form()],
         description: Annotated[str, Form()] = "",
         metadata: Annotated[str, Form()] = "{}",
+        file: UploadFile | None = File(default=None),
     ):
+        back = f"/skills/{skill_id}/clone?from={from_version}"
         try:
             meta = json.loads(metadata)
         except json.JSONDecodeError:
-            return _redirect(f"/skills/{skill_id}", "metadata must be valid JSON.", "error")
+            return _redirect(back, "metadata must be valid JSON.", "error")
+
+        client = get_client()
+        # Create the new skill row.
         try:
-            await get_client().create_skill({
-                "id": skill_id, "name": name, "description": description,
-                "version": version, "metadata": meta, "skillset_ids": [],
+            await client.create_skill({
+                "id": new_id,
+                "name": new_name,
+                "description": description,
+                "version": version,
+                "metadata": meta,
+                "skillset_ids": [],
             })
-            # Jump straight to the new version so the user sees what they made.
-            return _redirect(
-                f"/skills/{skill_id}?version={version}", f"Version {version} added."
-            )
         except MCPError as exc:
-            return _redirect(f"/skills/{skill_id}", str(exc), "error")
+            return _redirect(back, str(exc), "error")
+
+        dest = f"/skills/{new_id}?version={version}"
+
+        if bundle_action == "copy":
+            try:
+                await client.copy_bundle(new_id, version, skill_id, from_version)
+                return _redirect(
+                    dest,
+                    f"Cloned {skill_id} → {new_id} (v{version}); "
+                    f"bundle copied from v{from_version}.",
+                )
+            except MCPError as exc:
+                return _redirect(
+                    dest,
+                    f"Cloned but bundle copy failed: {exc}",
+                    "error",
+                )
+        if bundle_action == "upload":
+            if file is None or not file.filename:
+                return _redirect(
+                    dest,
+                    f"Cloned to {new_id}, but no bundle file was uploaded.",
+                    "error",
+                )
+            try:
+                data = await file.read()
+                await client.upload_bundle(new_id, version, file.filename, data)
+                return _redirect(
+                    dest, f"Cloned to {new_id} (v{version}) with new bundle."
+                )
+            except MCPError as exc:
+                return _redirect(
+                    dest,
+                    f"Cloned but bundle upload failed: {exc}",
+                    "error",
+                )
+        # 'none'
+        return _redirect(dest, f"Cloned to {new_id} (no bundle).")
+
+    # ------------------------------------------------------------------ #
+    # New version — prefilled from an existing version, may inherit the   #
+    # source bundle or upload a new one. The view page is read-only; all  #
+    # metadata/bundle changes happen here and produce a new version.      #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/skills/{skill_id}/new-version", response_class=HTMLResponse)
+    async def new_version_page(
+        request: Request,
+        skill_id: str,
+        from_: str | None = None,
+    ):
+        # Accept ?from= via alias to avoid colliding with Python's keyword.
+        from_ = request.query_params.get("from") or from_
+        client = get_client()
+        try:
+            source = await client.get_skill(skill_id, version=from_)
+            try:
+                src_bundle_files = await client.list_bundle_files(
+                    skill_id, source["version"]
+                )
+            except MCPError:
+                src_bundle_files = []
+        except MCPError as exc:
+            return _redirect("/skills", str(exc), "error")
+        return _render(request, "skill_new_version.html", {
+            "active": "skills",
+            "source": source,
+            "metadata_json": json.dumps(source.get("metadata") or {}, indent=2),
+            "src_bundle_file_count": len(src_bundle_files),
+            "error": None,
+            **_flash_ctx("", "success"),
+        })
+
+    @app.post("/skills/{skill_id}/new-version")
+    async def create_new_version(
+        skill_id: str,
+        version: Annotated[str, Form()],
+        from_version: Annotated[str, Form()],
+        bundle_action: Annotated[str, Form()],  # 'copy' | 'upload' | 'none'
+        description: Annotated[str, Form()] = "",
+        metadata: Annotated[str, Form()] = "{}",
+        file: UploadFile | None = File(default=None),
+    ):
+        back = f"/skills/{skill_id}/new-version?from={from_version}"
+        try:
+            meta = json.loads(metadata)
+        except json.JSONDecodeError:
+            return _redirect(back, "metadata must be valid JSON.", "error")
+
+        client = get_client()
+        # Name is immutable for a skill — inherit from the source version.
+        try:
+            source = await client.get_skill(skill_id, version=from_version)
+        except MCPError as exc:
+            return _redirect(back, str(exc), "error")
+
+        # 1) Create the new version row.
+        try:
+            await client.create_skill({
+                "id": skill_id,
+                "name": source["name"],
+                "description": description,
+                "version": version,
+                "metadata": meta,
+                "skillset_ids": [],
+            })
+        except MCPError as exc:
+            return _redirect(back, str(exc), "error")
+
+        dest = f"/skills/{skill_id}?version={version}"
+
+        # 2) Attach the bundle per the user's choice.
+        if bundle_action == "copy":
+            try:
+                await client.copy_bundle(skill_id, version, skill_id, from_version)
+                return _redirect(
+                    dest,
+                    f"Version {version} created, bundle copied from v{from_version}.",
+                )
+            except MCPError as exc:
+                return _redirect(
+                    dest,
+                    f"Version {version} created, but bundle copy failed: {exc}",
+                    "error",
+                )
+        if bundle_action == "upload":
+            if file is None or not file.filename:
+                return _redirect(
+                    dest,
+                    f"Version {version} created, but no bundle file was uploaded.",
+                    "error",
+                )
+            try:
+                data = await file.read()
+                await client.upload_bundle(
+                    skill_id, version, file.filename, data
+                )
+                return _redirect(dest, f"Version {version} created with new bundle.")
+            except MCPError as exc:
+                return _redirect(
+                    dest,
+                    f"Version {version} created, but bundle upload failed: {exc}",
+                    "error",
+                )
+        # 'none' — leave the new version bundle-less.
+        return _redirect(dest, f"Version {version} created (no bundle).")
 
     @app.delete("/skills/{skill_id}")
     async def delete_skill(skill_id: str):
@@ -395,29 +569,8 @@ def create_app() -> FastAPI:
             return Response(status_code=500)
 
     # ------------------------------------------------------------------ #
-    # Bundles                                                             #
+    # Bundle file fetch (for the viewer modal)                            #
     # ------------------------------------------------------------------ #
-
-    @app.post("/skills/{skill_id}/versions/{version}/bundle")
-    async def upload_bundle(
-        skill_id: str,
-        version: str,
-        file: UploadFile = File(...),
-    ):
-        try:
-            data = await file.read()
-            result = await get_client().upload_bundle(
-                skill_id, version, file.filename or "bundle.zip", data
-            )
-            return _redirect(
-                f"/skills/{skill_id}?version={version}",
-                f"Bundle uploaded: {result['file_count']} files, "
-                f"{result['total_size']} bytes.",
-            )
-        except MCPError as exc:
-            return _redirect(
-                f"/skills/{skill_id}?version={version}", str(exc), "error"
-            )
 
     @app.get("/skills/{skill_id}/versions/{version}/files/{path:path}")
     async def download_bundle_file(skill_id: str, version: str, path: str):
