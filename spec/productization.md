@@ -178,14 +178,19 @@ order.
 
 ### 3.2 Storage
 
-- **[P0] Postgres as the default DB** (behind a SQLAlchemy URL;
-  dev keeps SQLite). Deliverable: switch connection pooling to `QueuePool`,
-  remove the `StaticPool` branch for non-`:memory:` URLs, add a sane
-  `pool_size` / `max_overflow` default, verify `ondelete=CASCADE` actually
-  fires (SQLite needs `PRAGMA foreign_keys=ON`; Postgres is fine).
-- **[P0] Alembic for schema migrations.** `alembic revision --autogenerate`
-  from the current models as the initial migration. Add to the CI so PRs
-  that change a model require a migration.
+- **[P0 — partially SHIPPED] Postgres as the default DB** (behind a
+  SQLAlchemy URL; dev keeps SQLite). Added `[postgres]` extra
+  (`psycopg2-binary`). `ondelete=CASCADE` now fires in dev via a
+  `PRAGMA foreign_keys=ON` connect listener. Remaining: explicit
+  `QueuePool` tuning + `pool_size` / `max_overflow` defaults.
+- **[P0 — SHIPPED] Alembic for schema migrations.** `alembic.ini` +
+  `migrations/env.py` + `0001_initial_schema.py` matching current models.
+  Production / on-disk dev runs `alembic upgrade head` on startup; the
+  `:memory:` test path keeps using `create_all`. `tests/test_migrations.py`
+  enforces parity between migrations and `Base.metadata` (catches the
+  classic "PR forgot the migration" drift) and round-trips
+  `downgrade base`. Postgres parity covered by the same tests when
+  `MCP_TEST_POSTGRES_URL` is set.
 - **[P0] Move bundle bytes to object storage.** Keep the `skill_files` row
   as the index; swap the `content BLOB` column for `storage_key TEXT`,
   `storage_backend TEXT`, `size`, `sha256`. Implement a `BundleStore`

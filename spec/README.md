@@ -25,6 +25,7 @@ Implementation (high-level):
 - `webui.md` — browser-based management interface (sidebar nav, quick-view modals, immutable-version workflow, clone-to-rename, bundle file viewer with syntax highlighting).
 - `example-frameworks.md` — how Anthropic SDK / OpenAI / LangChain / LangGraph / Cursor consume the catalog; layout of the per-framework runners under `example/`.
 - `productization.md` — gap analysis and action plan for turning the prototype into a deployable, multi-tenant cloud service (identity, storage, scaling, observability, rollout milestones).
+- `migrations.md` — Alembic workflow: when migrations run, how to create and review them, conventions, and the Postgres dev/test story.
 
 Per-submodule specs (implementation-level, one file per source module):
 
