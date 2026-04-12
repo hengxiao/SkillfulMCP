@@ -102,6 +102,24 @@ def create_app() -> FastAPI:
             **_flash_ctx(msg, msg_type),
         })
 
+    @app.get("/skillsets/{skillset_id}/modal", response_class=HTMLResponse)
+    async def skillset_modal(request: Request, skillset_id: str):
+        """Return the modal body partial for a quick-view of a skillset."""
+        client = get_client()
+        try:
+            skillset = await client.get_skillset(skillset_id)
+            member_skills = await client.list_skillset_skills(skillset_id)
+        except MCPError as exc:
+            return HTMLResponse(
+                f'<div class="modal-body"><div class="alert alert-danger mb-0">'
+                f'{exc}</div></div>',
+                status_code=exc.status_code or 500,
+            )
+        return _render(request, "_skillset_modal.html", {
+            "skillset": skillset,
+            "member_skills": member_skills,
+        })
+
     @app.post("/skillsets")
     async def create_skillset(
         id: Annotated[str, Form()],
@@ -208,6 +226,32 @@ def create_app() -> FastAPI:
             **_flash_ctx(msg, msg_type),
         })
 
+    @app.get("/skills/{skill_id}/modal", response_class=HTMLResponse)
+    async def skill_modal(request: Request, skill_id: str):
+        """Return the modal body partial for a quick-view of a skill."""
+        client = get_client()
+        try:
+            skill = await client.get_skill(skill_id)
+            versions = await client.list_skill_versions(skill_id)
+            try:
+                bundle_files = await client.list_bundle_files(
+                    skill_id, skill["version"]
+                )
+            except MCPError:
+                bundle_files = []
+        except MCPError as exc:
+            return HTMLResponse(
+                f'<div class="modal-body"><div class="alert alert-danger mb-0">'
+                f'{exc}</div></div>',
+                status_code=exc.status_code or 500,
+            )
+        return _render(request, "_skill_modal.html", {
+            "skill": skill,
+            "versions": versions,
+            "bundle_files": bundle_files,
+            "metadata_json": json.dumps(skill.get("metadata") or {}, indent=2),
+        })
+
     @app.post("/skills")
     async def create_skill(
         id: Annotated[str, Form()],
@@ -238,21 +282,24 @@ def create_app() -> FastAPI:
     async def skill_detail(
         request: Request,
         skill_id: str,
+        version: str | None = None,
         msg: str = "",
         msg_type: str = "success",
     ):
+        """Skill detail. ?version=X.Y.Z selects a specific version (default: latest)."""
         client = get_client()
         try:
-            skill = await client.get_skill(skill_id)
+            # Load the requested (or latest) version + the full version list.
+            skill = await client.get_skill(skill_id, version=version)
             versions = await client.list_skill_versions(skill_id)
-            # Bundle files for the latest version (if any)
+            # Bundle for the version we're displaying.
             try:
                 bundle_files = await client.list_bundle_files(
                     skill_id, skill["version"]
                 )
             except MCPError:
                 bundle_files = []
-            # Render SKILL.md inline if present
+            # Render SKILL.md inline if present.
             skill_md = None
             for bf in bundle_files:
                 if bf["path"].lower() == "skill.md":
@@ -289,15 +336,23 @@ def create_app() -> FastAPI:
         try:
             meta = json.loads(metadata)
         except json.JSONDecodeError:
-            return _redirect(f"/skills/{skill_id}", "metadata must be valid JSON.", "error")
+            return _redirect(
+                f"/skills/{skill_id}?version={version}",
+                "metadata must be valid JSON.",
+                "error",
+            )
         try:
             await get_client().update_skill(
                 skill_id,
                 {"name": name, "description": description, "version": version, "metadata": meta},
             )
-            return _redirect(f"/skills/{skill_id}", "Skill updated.")
+            return _redirect(
+                f"/skills/{skill_id}?version={version}", "Skill updated."
+            )
         except MCPError as exc:
-            return _redirect(f"/skills/{skill_id}", str(exc), "error")
+            return _redirect(
+                f"/skills/{skill_id}?version={version}", str(exc), "error"
+            )
 
     @app.post("/skills/{skill_id}/versions")
     async def create_skill_version(
@@ -316,7 +371,10 @@ def create_app() -> FastAPI:
                 "id": skill_id, "name": name, "description": description,
                 "version": version, "metadata": meta, "skillset_ids": [],
             })
-            return _redirect(f"/skills/{skill_id}", f"Version {version} added.")
+            # Jump straight to the new version so the user sees what they made.
+            return _redirect(
+                f"/skills/{skill_id}?version={version}", f"Version {version} added."
+            )
         except MCPError as exc:
             return _redirect(f"/skills/{skill_id}", str(exc), "error")
 
@@ -352,12 +410,14 @@ def create_app() -> FastAPI:
                 skill_id, version, file.filename or "bundle.zip", data
             )
             return _redirect(
-                f"/skills/{skill_id}",
+                f"/skills/{skill_id}?version={version}",
                 f"Bundle uploaded: {result['file_count']} files, "
                 f"{result['total_size']} bytes.",
             )
         except MCPError as exc:
-            return _redirect(f"/skills/{skill_id}", str(exc), "error")
+            return _redirect(
+                f"/skills/{skill_id}?version={version}", str(exc), "error"
+            )
 
     @app.get("/skills/{skill_id}/versions/{version}/files/{path:path}")
     async def download_bundle_file(skill_id: str, version: str, path: str):

@@ -1,0 +1,57 @@
+{#
+  Modal partial for skillset quick-view.
+  Injected into #detail-modal-content via HTMX hx-get.
+#}
+<div class="modal-header">
+  <h5 class="modal-title">
+    <i class="bi bi-collection text-primary me-2"></i>
+    {{ skillset.name }}
+    <code class="text-muted ms-2 small">{{ skillset.id }}</code>
+  </h5>
+  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+  {% if skillset.description %}
+  <p class="mb-3">{{ skillset.description }}</p>
+  {% else %}
+  <p class="text-muted fst-italic mb-3">No description.</p>
+  {% endif %}
+
+  <div class="row g-2 text-muted small mb-4">
+    <div class="col-6">
+      <div class="fw-semibold text-dark">Created</div>
+      {{ skillset.created_at[:19].replace('T',' ') if skillset.created_at else '—' }}
+    </div>
+    <div class="col-6">
+      <div class="fw-semibold text-dark">Updated</div>
+      {{ skillset.updated_at[:19].replace('T',' ') if skillset.updated_at else '—' }}
+    </div>
+  </div>
+
+  <h6 class="fw-semibold mb-2">
+    <i class="bi bi-lightning text-success me-1"></i>
+    Member Skills
+    <span class="badge bg-secondary ms-1">{{ member_skills | length }}</span>
+  </h6>
+  {% if member_skills %}
+  <ul class="list-group list-group-flush border rounded">
+    {% for s in member_skills %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        <code class="text-success">{{ s.id }}</code>
+        <span class="ms-2">{{ s.name }}</span>
+      </div>
+      <span class="badge bg-light text-dark border badge-mono">v{{ s.version }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="text-muted small">No skills in this skillset yet.</p>
+  {% endif %}
+</div>
+<div class="modal-footer">
+  <a href="/skillsets/{{ skillset.id }}" class="btn btn-primary">
+    <i class="bi bi-pencil me-1"></i>Open / Edit
+  </a>
+  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+</div>

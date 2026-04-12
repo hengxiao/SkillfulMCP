@@ -6,36 +6,181 @@
   <title>{% block title %}SkillfulMCP{% endblock %}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <!-- highlight.js for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
   <style>
-    body { background: #f5f6fa; }
-    .navbar-brand { font-weight: 700; letter-spacing: -.3px; }
+    :root {
+      --sidebar-width: 240px;
+      --sidebar-bg: #1f2437;
+      --sidebar-fg: #cfd3e3;
+      --sidebar-fg-active: #ffffff;
+      --sidebar-accent: #4c6ef5;
+    }
+    body { background: #f5f6fa; min-height: 100vh; }
     .table td, .table th { vertical-align: middle; }
     .badge-mono { font-family: ui-monospace, monospace; font-size: .8em; }
     .metadata-area { font-family: ui-monospace, monospace; font-size: .85em; min-height: 100px; }
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline-block; }
+
+    /* --- Sidebar (md and up) --- */
+    .app-sidebar {
+      width: var(--sidebar-width);
+      background: var(--sidebar-bg);
+      color: var(--sidebar-fg);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      z-index: 1030;
+    }
+    .app-sidebar .brand {
+      padding: 1rem 1.25rem;
+      color: #fff;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      font-size: 1.2rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .app-sidebar .nav-link {
+      color: var(--sidebar-fg);
+      padding: .65rem 1.25rem;
+      border-left: 3px solid transparent;
+      display: flex; align-items: center; gap: .65rem;
+      font-weight: 500;
+    }
+    .app-sidebar .nav-link:hover {
+      background: rgba(255,255,255,0.05);
+      color: #fff;
+    }
+    .app-sidebar .nav-link.active {
+      color: var(--sidebar-fg-active);
+      background: rgba(76,110,245,0.15);
+      border-left-color: var(--sidebar-accent);
+    }
+    .app-sidebar .nav-link i {
+      width: 1.25rem; text-align: center; font-size: 1.05rem;
+    }
+    .app-sidebar .sidebar-footer {
+      margin-top: auto;
+      padding: .75rem 1.25rem;
+      font-size: .75rem;
+      color: rgba(255,255,255,0.35);
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .app-main {
+      margin-left: var(--sidebar-width);
+      min-height: 100vh;
+      padding: 1.5rem 2rem 4rem;
+    }
+    .mobile-topbar { display: none; }
+
+    /* --- Mobile (< md): hide sidebar; show topbar + offcanvas --- */
+    @media (max-width: 767.98px) {
+      .app-sidebar.desktop-only { display: none; }
+      .app-main { margin-left: 0; padding: 1rem; }
+      .mobile-topbar {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        background: var(--sidebar-bg);
+        color: #fff;
+        padding: .6rem 1rem;
+        position: sticky; top: 0; z-index: 1020;
+        margin-bottom: 1rem;
+      }
+      .mobile-topbar .brand {
+        font-weight: 700; letter-spacing: -.3px;
+      }
+    }
+
+    /* Sidebar re-used inside offcanvas on mobile */
+    .offcanvas .app-sidebar {
+      position: static;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Clickable rows in browse tables */
+    .row-clickable { cursor: pointer; }
+    .row-clickable:hover { background-color: rgba(76,110,245,0.06) !important; }
+
+    /* File-viewer modal */
+    #file-viewer-modal .modal-dialog { max-width: 1100px; }
+    #file-viewer-content pre {
+      margin: 0;
+      max-height: 70vh;
+      overflow: auto;
+      font-size: 0.85rem;
+      background: #f8f9fb;
+      padding: 0;
+    }
+    #file-viewer-content pre code {
+      display: block;
+      padding: 1rem;
+      font-family: ui-monospace, "SF Mono", Monaco, Consolas, monospace;
+    }
+    /* Rendered markdown container */
+    .md-rendered { line-height: 1.55; }
+    .md-rendered h1, .md-rendered h2 { border-bottom: 1px solid #eee; padding-bottom: .3em; }
+    .md-rendered pre { background: #f6f8fa; padding: 12px; border-radius: 6px; overflow: auto; }
+    .md-rendered code { background: rgba(175,184,193,0.2); padding: .15em .35em; border-radius: 4px; font-size: 0.85em; }
+    .md-rendered pre code { background: transparent; padding: 0; }
+    .md-rendered table { border-collapse: collapse; margin: 1em 0; }
+    .md-rendered table th, .md-rendered table td { border: 1px solid #d0d7de; padding: 6px 12px; }
+    .md-rendered blockquote { border-left: 4px solid #d0d7de; padding: 0 1em; color: #57606a; margin-left: 0; }
   </style>
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 shadow-sm">
-  <div class="container">
-    <a class="navbar-brand" href="/"><i class="bi bi-cpu me-1"></i>SkillfulMCP</a>
-    <div class="navbar-nav ms-3">
-      <a class="nav-link {% if active == 'dashboard' %}active fw-semibold{% endif %}" href="/">
-        <i class="bi bi-speedometer2 me-1"></i>Dashboard
-      </a>
-      <a class="nav-link {% if active == 'skillsets' %}active fw-semibold{% endif %}" href="/skillsets">
-        <i class="bi bi-collection me-1"></i>Skillsets
-      </a>
-      <a class="nav-link {% if active == 'skills' %}active fw-semibold{% endif %}" href="/skills">
-        <i class="bi bi-lightning me-1"></i>Skills
-      </a>
-    </div>
+{# ----- Sidebar partial reused on desktop + offcanvas ----- #}
+{% macro render_sidebar() %}
+<aside class="app-sidebar">
+  <div class="brand">
+    <i class="bi bi-cpu"></i> SkillfulMCP
   </div>
-</nav>
+  <nav class="nav flex-column mt-2">
+    <a class="nav-link {% if active == 'dashboard' %}active{% endif %}" href="/">
+      <i class="bi bi-speedometer2"></i><span>Dashboard</span>
+    </a>
+    <a class="nav-link {% if active == 'skillsets' %}active{% endif %}" href="/skillsets">
+      <i class="bi bi-collection"></i><span>Skillsets</span>
+    </a>
+    <a class="nav-link {% if active == 'skills' %}active{% endif %}" href="/skills">
+      <i class="bi bi-lightning"></i><span>Skills</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    v0.1.0 prototype
+  </div>
+</aside>
+{% endmacro %}
 
-<div class="container pb-5">
+{# Desktop sidebar #}
+<div class="d-none d-md-block">
+  {{ render_sidebar() }}
+</div>
+
+{# Mobile topbar with hamburger #}
+<div class="mobile-topbar">
+  <button class="btn btn-dark btn-sm" type="button"
+          data-bs-toggle="offcanvas" data-bs-target="#sidebarOffcanvas"
+          aria-controls="sidebarOffcanvas" aria-label="Toggle navigation">
+    <i class="bi bi-list fs-5"></i>
+  </button>
+  <span class="brand"><i class="bi bi-cpu me-1"></i>SkillfulMCP</span>
+</div>
+
+{# Mobile offcanvas sidebar #}
+<div class="offcanvas offcanvas-start p-0 text-bg-dark" tabindex="-1"
+     id="sidebarOffcanvas" aria-labelledby="sidebarOffcanvasLabel"
+     style="width: var(--sidebar-width); background: var(--sidebar-bg);">
+  {{ render_sidebar() }}
+</div>
+
+<main class="app-main">
 
   {% if error %}
   <div class="alert alert-danger d-flex align-items-center gap-2 mb-4" role="alert">
@@ -52,9 +197,169 @@
   {% endif %}
 
   {% block content %}{% endblock %}
+</main>
+
+{# ----- Shared detail modal ----- #}
+<div id="detail-modal" class="modal fade" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div id="detail-modal-content" class="modal-content">
+      <div class="modal-body text-center text-muted py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <div class="mt-2">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ----- File viewer modal (for bundle file contents) ----- #}
+<div id="file-viewer-modal" class="modal fade" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-file-earmark-text me-2"></i>
+          <span id="file-viewer-path" class="font-monospace small">file</span>
+        </h5>
+        <a id="file-viewer-download" href="#" class="btn btn-sm btn-outline-secondary ms-3" download>
+          <i class="bi bi-download me-1"></i>Download
+        </a>
+        <button type="button" class="btn-close ms-2" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div id="file-viewer-content" class="text-muted text-center py-5">
+          <div class="spinner-border text-primary" role="status"></div>
+          <div class="mt-2">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
+<!-- Markdown + syntax highlighting for the file viewer -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+  // Reset detail-modal content on close.
+  document.addEventListener('DOMContentLoaded', () => {
+    const modalEl = document.getElementById('detail-modal');
+    if (modalEl) {
+      modalEl.addEventListener('hidden.bs.modal', () => {
+        document.getElementById('detail-modal-content').innerHTML =
+          '<div class="modal-body text-center text-muted py-5">' +
+          '<div class="spinner-border text-primary" role="status"></div>' +
+          '<div class="mt-2">Loading…</div></div>';
+      });
+    }
+  });
+
+  // Map common extensions → highlight.js language.
+  const EXT_TO_LANG = {
+    py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript', jsx: 'javascript',
+    html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
+    css: 'css', scss: 'scss',
+    json: 'json',
+    yml: 'yaml', yaml: 'yaml',
+    sh: 'bash', bash: 'bash', zsh: 'bash',
+    sql: 'sql', rb: 'ruby', go: 'go', rs: 'rust',
+    java: 'java', kt: 'kotlin', c: 'c', h: 'c',
+    cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
+    toml: 'ini', ini: 'ini', dockerfile: 'dockerfile',
+    txt: 'plaintext', log: 'plaintext', gitignore: 'plaintext',
+  };
+
+  // Binary detection: null byte in first 1 KB = binary.
+  function looksBinary(text) {
+    const probe = text.slice(0, 1024);
+    for (let i = 0; i < probe.length; i++) {
+      if (probe.charCodeAt(i) === 0) return true;
+    }
+    return false;
+  }
+
+  function extOf(path) {
+    const base = path.split('/').pop() || '';
+    if (base.toLowerCase() === 'dockerfile') return 'dockerfile';
+    const dot = base.lastIndexOf('.');
+    return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+  }
+
+  // Open the viewer with a file fetched from a URL returning its raw bytes.
+  async function viewBundleFile(skillId, version, path) {
+    const modalEl = document.getElementById('file-viewer-modal');
+    const pathEl = document.getElementById('file-viewer-path');
+    const dlEl = document.getElementById('file-viewer-download');
+    const contentEl = document.getElementById('file-viewer-content');
+    const url = `/skills/${encodeURIComponent(skillId)}/versions/${encodeURIComponent(version)}/files/${path}`;
+
+    pathEl.textContent = path;
+    dlEl.href = url;
+    dlEl.setAttribute('download', path.split('/').pop() || 'file');
+    contentEl.className = 'text-muted text-center py-5';
+    contentEl.innerHTML =
+      '<div class="spinner-border text-primary" role="status"></div>' +
+      '<div class="mt-2">Loading…</div>';
+
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      // Decode as UTF-8; if it's not valid text, we'll still show with fallback.
+      const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      const ext = extOf(path);
+
+      if (looksBinary(text)) {
+        contentEl.className = 'p-4 text-center text-muted';
+        contentEl.innerHTML =
+          `<i class="bi bi-file-earmark-binary fs-1 d-block mb-2"></i>` +
+          `<div>Binary file — ${bytes.length.toLocaleString()} bytes.</div>` +
+          `<div class="mt-3"><a class="btn btn-outline-primary btn-sm" href="${url}" download>` +
+          `<i class="bi bi-download me-1"></i>Download</a></div>`;
+        return;
+      }
+
+      if (ext === 'md' || ext === 'markdown') {
+        // Render markdown.
+        marked.setOptions({ breaks: false, gfm: true });
+        contentEl.className = 'p-4 md-rendered';
+        contentEl.innerHTML = marked.parse(text);
+        // Apply syntax highlighting to any <pre><code class="language-xxx"> blocks.
+        contentEl.querySelectorAll('pre code').forEach((block) => {
+          try { hljs.highlightElement(block); } catch (_) {}
+        });
+        return;
+      }
+
+      const lang = EXT_TO_LANG[ext] || '';
+      contentEl.className = '';
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      if (lang) code.className = `language-${lang}`;
+      code.textContent = text;
+      pre.appendChild(code);
+      contentEl.innerHTML = '';
+      contentEl.appendChild(pre);
+      if (lang) {
+        try { hljs.highlightElement(code); } catch (_) {}
+      } else {
+        // Let hljs auto-detect for unknown text extensions.
+        try { hljs.highlightElement(code); } catch (_) {}
+      }
+    } catch (err) {
+      contentEl.className = 'p-4';
+      contentEl.innerHTML =
+        `<div class="alert alert-danger mb-0">Failed to load: ${err.message}</div>`;
+    }
+  }
+
+  // Expose globally for onclick handlers in templates.
+  window.viewBundleFile = viewBundleFile;
+</script>
 </body>
 </html>

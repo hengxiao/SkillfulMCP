@@ -24,7 +24,12 @@
       </thead>
       <tbody>
         {% for skill in skills %}
-        <tr>
+        <tr class="row-clickable"
+            hx-get="/skills/{{ skill.id }}/modal"
+            hx-target="#detail-modal-content"
+            hx-trigger="click"
+            data-bs-toggle="modal"
+            data-bs-target="#detail-modal">
           <td><code class="text-success">{{ skill.id }}</code></td>
           <td class="fw-semibold">{{ skill.name }}</td>
           <td>
@@ -34,7 +39,7 @@
             <span class="text-truncate d-block">{{ skill.description or '—' }}</span>
           </td>
           <td class="text-muted small">{{ skill.updated_at[:10] if skill.updated_at else '—' }}</td>
-          <td class="text-end">
+          <td class="text-end" onclick="event.stopPropagation()">
             <a href="/skills/{{ skill.id }}" class="btn btn-sm btn-outline-secondary me-1">
               <i class="bi bi-pencil me-1"></i>Edit
             </a>

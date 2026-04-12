@@ -10,28 +10,58 @@
   </ol>
 </nav>
 
-<div class="d-flex align-items-center justify-content-between mb-4">
-  <h2 class="mb-0 fw-bold"><i class="bi bi-lightning me-2 text-success"></i>{{ skill.name }}</h2>
-  <div class="d-flex align-items-center gap-2">
-    <code class="text-muted">{{ skill.id }}</code>
-    <span class="badge bg-success badge-mono fs-6">v{{ skill.version }}</span>
+<!-- Header -->
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h2 class="mb-1 fw-bold">
+      <i class="bi bi-lightning me-2 text-success"></i>{{ skill.name }}
+    </h2>
+    <div class="d-flex align-items-center gap-2 small text-muted">
+      <code>{{ skill.id }}</code>
+      <span>·</span>
+      <span>{{ versions | length }} version{{ '' if versions | length == 1 else 's' }}</span>
+    </div>
   </div>
 </div>
 
+{% if skill.description %}
+<p class="text-muted mb-4">{{ skill.description }}</p>
+{% endif %}
+
+<!-- Version selector -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-2">
+    <span class="text-muted small me-1">Version:</span>
+    {% for v in versions | sort(attribute='version', reverse=True) %}
+      {% set selected = v.version == skill.version %}
+      <a href="/skills/{{ skill.id }}?version={{ v.version }}"
+         class="btn btn-sm {{ 'btn-success' if selected else 'btn-outline-secondary' }} d-inline-flex align-items-center gap-1">
+        <span class="font-monospace">v{{ v.version }}</span>
+        {% if v.is_latest %}<span class="badge bg-light text-dark">latest</span>{% endif %}
+      </a>
+    {% endfor %}
+    <button type="button" class="btn btn-sm btn-outline-success ms-2"
+            data-bs-toggle="modal" data-bs-target="#new-version-modal">
+      <i class="bi bi-plus-lg me-1"></i>New version
+    </button>
+  </div>
+</div>
+
+<!-- Selected version details -->
 <div class="row g-4">
-  <!-- Left: edit form -->
+  <!-- Left column: edit form + delete -->
   <div class="col-lg-5">
     <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white fw-semibold border-bottom pt-3">
-        <i class="bi bi-pencil me-1"></i> Edit Latest Version (v{{ skill.version }})
+      <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
+        <span>
+          <i class="bi bi-pencil me-1"></i>Edit
+          <span class="badge bg-success badge-mono ms-1">v{{ skill.version }}</span>
+          {% if skill.is_latest %}<span class="badge bg-light text-dark border ms-1">latest</span>{% endif %}
+        </span>
       </div>
       <div class="card-body">
         <form method="post" action="/skills/{{ skill.id }}/update">
           <input type="hidden" name="version" value="{{ skill.version }}">
-          <div class="mb-3">
-            <label class="form-label fw-semibold">ID</label>
-            <input type="text" class="form-control font-monospace bg-light" value="{{ skill.id }}" disabled>
-          </div>
           <div class="mb-3">
             <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
             <input type="text" name="name" class="form-control" value="{{ skill.name }}" required>
@@ -45,14 +75,13 @@
             <textarea name="metadata" class="form-control metadata-area" rows="8">{{ metadata_json }}</textarea>
           </div>
           <button type="submit" class="btn btn-primary w-100">
-            <i class="bi bi-save me-1"></i>Save Changes
+            <i class="bi bi-save me-1"></i>Save changes
           </button>
         </form>
       </div>
     </div>
 
-    <!-- Timestamps -->
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm mb-4">
       <div class="card-body">
         <div class="row g-2 text-muted small">
           <div class="col-6">
@@ -66,58 +95,34 @@
         </div>
       </div>
     </div>
+
+    <!-- Danger zone -->
+    <div class="card border-0 shadow-sm border-danger-subtle">
+      <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between gap-3">
+          <div>
+            <div class="fw-semibold text-danger">Delete this version</div>
+            <div class="text-muted small">Removes v{{ skill.version }} and its bundle. Cannot be undone.</div>
+          </div>
+          <button
+            hx-delete="/skills/{{ skill.id }}/versions/{{ skill.version }}"
+            hx-confirm="Delete version {{ skill.version }}?{% if skill.is_latest %} This is the latest version.{% endif %}"
+            hx-on::after-request="if(event.detail.successful) window.location='/skills/{{ skill.id }}'"
+            class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-trash me-1"></i>Delete
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <!-- Right: version history + add version -->
+  <!-- Right column: bundle + SKILL.md -->
   <div class="col-lg-7">
     <div class="card border-0 shadow-sm mb-4">
       <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-clock-history me-1"></i> Version History</span>
-        <span class="badge bg-secondary">{{ versions | length }}</span>
-      </div>
-      <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>Version</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th class="text-end">Delete</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for v in versions | sort(attribute='version', reverse=True) %}
-            <tr>
-              <td><span class="badge bg-light text-dark border badge-mono fs-6">{{ v.version }}</span></td>
-              <td>
-                {% if v.is_latest %}
-                <span class="badge bg-success">latest</span>
-                {% else %}
-                <span class="badge bg-secondary">old</span>
-                {% endif %}
-              </td>
-              <td class="text-muted small">{{ v.created_at[:19].replace('T',' ') if v.created_at else '—' }}</td>
-              <td class="text-end">
-                <button
-                  hx-delete="/skills/{{ skill.id }}/versions/{{ v.version }}"
-                  hx-target="closest tr"
-                  hx-swap="delete"
-                  hx-confirm="Delete version {{ v.version }}?{% if v.is_latest %} This is the latest version.{% endif %}"
-                  class="btn btn-sm btn-outline-danger">
-                  <i class="bi bi-trash"></i>
-                </button>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Bundle files -->
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-archive me-1"></i> Bundle (v{{ skill.version }})</span>
+        <span><i class="bi bi-archive me-1"></i>Bundle
+          <span class="badge bg-success badge-mono ms-1">v{{ skill.version }}</span>
+        </span>
         <span class="badge bg-secondary">{{ (bundle_files or []) | length }} files</span>
       </div>
       <div class="card-body">
@@ -134,7 +139,7 @@
             </button>
           </div>
           <div class="form-text">
-            Upload a skill bundle archive (zip, tar, tar.gz, tar.bz2, or tar.xz). Max 100 MB. Replaces any existing bundle for this version.
+            zip / tar / tar.gz / tar.bz2 / tar.xz. Max 100 MB. Replaces any existing bundle for v{{ skill.version }}.
           </div>
         </form>
 
@@ -149,13 +154,22 @@
             </thead>
             <tbody>
               {% for f in bundle_files %}
-              <tr>
-                <td class="font-monospace small">{{ f.path }}</td>
+              <tr class="row-clickable"
+                  onclick='viewBundleFile({{ skill.id | tojson }}, {{ skill.version | tojson }}, {{ f.path | tojson }})'
+                  title="Click to view">
+                <td class="font-monospace small">
+                  <i class="bi bi-file-earmark-text text-muted me-1"></i>{{ f.path }}
+                </td>
                 <td class="text-end text-muted small">{{ f.size }}</td>
-                <td class="text-end">
+                <td class="text-end" onclick="event.stopPropagation()">
+                  <button type="button" class="btn btn-sm btn-outline-primary me-1"
+                          onclick='viewBundleFile({{ skill.id | tojson }}, {{ skill.version | tojson }}, {{ f.path | tojson }})'
+                          title="View">
+                    <i class="bi bi-eye"></i>
+                  </button>
                   <a class="btn btn-sm btn-outline-secondary"
                      href="/skills/{{ skill.id }}/versions/{{ skill.version }}/files/{{ f.path }}"
-                     target="_blank"
+                     download
                      title="Download">
                     <i class="bi bi-download"></i>
                   </a>
@@ -171,28 +185,40 @@
     </div>
 
     {% if skill_md %}
-    <div class="card border-0 shadow-sm mb-4">
-      <div class="card-header bg-white fw-semibold border-bottom pt-3">
-        <i class="bi bi-file-text me-1"></i> SKILL.md
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-file-text me-1"></i>SKILL.md</span>
+        <button type="button" class="btn btn-sm btn-outline-primary"
+                onclick='viewBundleFile({{ skill.id | tojson }}, {{ skill.version | tojson }}, "SKILL.md")'>
+          <i class="bi bi-eye me-1"></i>Open rendered
+        </button>
       </div>
       <div class="card-body">
         <pre class="mb-0" style="white-space: pre-wrap; max-height: 400px; overflow: auto; font-size: 0.85rem;">{{ skill_md }}</pre>
       </div>
     </div>
     {% endif %}
+  </div>
+</div>
 
-    <!-- Add new version -->
-    <div class="card border-0 shadow-sm">
-      <div class="card-header bg-white fw-semibold border-bottom-0 pt-3">
-        <i class="bi bi-plus-circle me-1 text-success"></i> Add New Version
-      </div>
-      <div class="card-body">
-        <form method="post" action="/skills/{{ skill.id }}/versions">
+<!-- New version modal -->
+<div class="modal fade" id="new-version-modal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="post" action="/skills/{{ skill.id }}/versions">
+        <div class="modal-header">
+          <h5 class="modal-title">
+            <i class="bi bi-plus-circle text-success me-2"></i>Add new version to <code class="ms-1">{{ skill.id }}</code>
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
           <div class="row g-3 mb-3">
             <div class="col-md-4">
               <label class="form-label fw-semibold">Version <span class="text-danger">*</span></label>
               <input type="text" name="version" class="form-control font-monospace"
                      placeholder="e.g. 2.0.0" required pattern="\d+\.\d+\.\d+.*">
+              <div class="form-text">Semver; must not duplicate an existing version.</div>
             </div>
             <div class="col-md-8">
               <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
@@ -203,16 +229,19 @@
             <label class="form-label fw-semibold">Description</label>
             <input type="text" name="description" class="form-control" value="{{ skill.description or '' }}">
           </div>
-          <div class="mb-3">
+          <div class="mb-0">
             <label class="form-label fw-semibold">Metadata <span class="text-muted fw-normal">(JSON)</span></label>
-            <textarea name="metadata" class="form-control metadata-area" rows="5">{{ metadata_json }}</textarea>
-            <div class="form-text">Pre-filled from the latest version. Edit as needed.</div>
+            <textarea name="metadata" class="form-control metadata-area" rows="6">{{ metadata_json }}</textarea>
+            <div class="form-text">Pre-filled from v{{ skill.version }}. Edit as needed.</div>
           </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="submit" class="btn btn-success">
-            <i class="bi bi-plus-lg me-1"></i>Add Version
+            <i class="bi bi-plus-lg me-1"></i>Create version
           </button>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   </div>
 </div>

@@ -1,0 +1,93 @@
+{#
+  Modal partial for skill quick-view.
+  Injected into #detail-modal-content via HTMX hx-get.
+#}
+<div class="modal-header">
+  <h5 class="modal-title">
+    <i class="bi bi-lightning text-success me-2"></i>
+    {{ skill.name }}
+    <code class="text-muted ms-2 small">{{ skill.id }}</code>
+    <span class="badge bg-success badge-mono ms-2">v{{ skill.version }}</span>
+  </h5>
+  <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+  {% if skill.description %}
+  <p class="mb-3">{{ skill.description }}</p>
+  {% else %}
+  <p class="text-muted fst-italic mb-3">No description.</p>
+  {% endif %}
+
+  <div class="row g-2 text-muted small mb-4">
+    <div class="col-sm-4">
+      <div class="fw-semibold text-dark">Latest version</div>
+      v{{ skill.version }}
+    </div>
+    <div class="col-sm-4">
+      <div class="fw-semibold text-dark">Created</div>
+      {{ skill.created_at[:19].replace('T',' ') if skill.created_at else '—' }}
+    </div>
+    <div class="col-sm-4">
+      <div class="fw-semibold text-dark">Updated</div>
+      {{ skill.updated_at[:19].replace('T',' ') if skill.updated_at else '—' }}
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <h6 class="fw-semibold mb-2"><i class="bi bi-clock-history me-1"></i>Versions</h6>
+      {% if versions %}
+      <ul class="list-group list-group-flush border rounded mb-3">
+        {% for v in versions | sort(attribute='version', reverse=True) %}
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+          <span class="badge bg-light text-dark border badge-mono">{{ v.version }}</span>
+          {% if v.is_latest %}
+          <span class="badge bg-success">latest</span>
+          {% else %}
+          <span class="text-muted small">{{ v.created_at[:10] if v.created_at else '' }}</span>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted small">No versions.</p>
+      {% endif %}
+    </div>
+
+    <div class="col-md-6">
+      <h6 class="fw-semibold mb-2">
+        <i class="bi bi-archive me-1"></i>Bundle
+        <span class="badge bg-secondary ms-1">{{ bundle_files | length }} files</span>
+      </h6>
+      {% if bundle_files %}
+      <div class="border rounded" style="max-height: 220px; overflow-y: auto;">
+        <ul class="list-group list-group-flush small">
+          {% for f in bundle_files %}
+          <li class="list-group-item py-1 d-flex justify-content-between align-items-center row-clickable"
+              onclick='viewBundleFile({{ skill.id | tojson }}, {{ skill.version | tojson }}, {{ f.path | tojson }})'
+              title="Click to view">
+            <span class="font-monospace text-truncate me-2">
+              <i class="bi bi-file-earmark-text text-muted me-1"></i>{{ f.path }}
+            </span>
+            <span class="text-muted small">{{ f.size }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No bundle uploaded for this version.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if skill.metadata %}
+  <h6 class="fw-semibold mt-4 mb-2"><i class="bi bi-braces me-1"></i>Metadata</h6>
+  <pre class="bg-light p-2 rounded mb-0" style="max-height: 180px; overflow: auto; font-size: 0.8rem;">{{ metadata_json }}</pre>
+  {% endif %}
+</div>
+<div class="modal-footer">
+  <a href="/skills/{{ skill.id }}" class="btn btn-success">
+    <i class="bi bi-pencil me-1"></i>Open / Edit
+  </a>
+  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+</div>

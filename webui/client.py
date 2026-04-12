@@ -83,8 +83,11 @@ class MCPClient:
     async def list_skills(self) -> list[dict]:
         return await self._request("GET", "/admin/skills")
 
-    async def get_skill(self, skill_id: str) -> dict:
-        return await self._request("GET", f"/admin/skills/{skill_id}")
+    async def get_skill(self, skill_id: str, version: str | None = None) -> dict:
+        params = {"version": version} if version else {}
+        return await self._request(
+            "GET", f"/admin/skills/{skill_id}", params=params
+        )
 
     async def list_skill_versions(self, skill_id: str) -> list[dict]:
         return await self._request("GET", f"/admin/skills/{skill_id}/versions")

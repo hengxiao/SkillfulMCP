@@ -5,7 +5,7 @@ agent-facing endpoints.  All routes here require X-Admin-Key.
 
 import mimetypes
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -65,15 +65,19 @@ def list_skill_versions(
 @router.get("/skills/{skill_id}", response_model=SkillResponse)
 def get_skill_admin(
     skill_id: str,
+    version: str | None = Query(default=None, description="Specific version; omit for latest"),
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
 ):
-    """Get the latest version of a skill (admin, no JWT required)."""
-    skill = (
-        db.query(Skill)
-        .filter(Skill.id == skill_id, Skill.is_latest.is_(True))
-        .first()
-    )
+    """Get a skill (latest or a specific version) — admin, no JWT required."""
+    if version:
+        skill = get_skill_version(db, skill_id, version)
+    else:
+        skill = (
+            db.query(Skill)
+            .filter(Skill.id == skill_id, Skill.is_latest.is_(True))
+            .first()
+        )
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
     return _to_response(skill)
