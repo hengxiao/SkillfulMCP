@@ -15,8 +15,8 @@ from typing import Annotated
 from urllib.parse import quote
 
 import uvicorn
-from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, Request, Response, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from .client import MCPClient, MCPError
@@ -45,8 +45,7 @@ def _redirect(path: str, msg: str = "", msg_type: str = "success") -> RedirectRe
 
 
 def _render(request: Request, template: str, ctx: dict) -> HTMLResponse:
-    ctx["request"] = request
-    return templates.TemplateResponse(template, ctx)
+    return templates.TemplateResponse(request, template, ctx)
 
 
 def _flash_ctx(msg: str, msg_type: str) -> dict:
@@ -246,6 +245,25 @@ def create_app() -> FastAPI:
         try:
             skill = await client.get_skill(skill_id)
             versions = await client.list_skill_versions(skill_id)
+            # Bundle files for the latest version (if any)
+            try:
+                bundle_files = await client.list_bundle_files(
+                    skill_id, skill["version"]
+                )
+            except MCPError:
+                bundle_files = []
+            # Render SKILL.md inline if present
+            skill_md = None
+            for bf in bundle_files:
+                if bf["path"].lower() == "skill.md":
+                    try:
+                        content = await client.get_bundle_file(
+                            skill_id, skill["version"], bf["path"]
+                        )
+                        skill_md = content.decode("utf-8", errors="replace")
+                    except MCPError:
+                        pass
+                    break
             error = None
         except MCPError as exc:
             return _redirect("/skills", str(exc), "error")
@@ -253,6 +271,8 @@ def create_app() -> FastAPI:
             "active": "skills",
             "skill": skill,
             "versions": versions,
+            "bundle_files": bundle_files,
+            "skill_md": skill_md,
             "metadata_json": json.dumps(skill.get("metadata") or {}, indent=2),
             "error": error,
             **_flash_ctx(msg, msg_type),
@@ -315,6 +335,37 @@ def create_app() -> FastAPI:
             return Response(status_code=200)
         except MCPError:
             return Response(status_code=500)
+
+    # ------------------------------------------------------------------ #
+    # Bundles                                                             #
+    # ------------------------------------------------------------------ #
+
+    @app.post("/skills/{skill_id}/versions/{version}/bundle")
+    async def upload_bundle(
+        skill_id: str,
+        version: str,
+        file: UploadFile = File(...),
+    ):
+        try:
+            data = await file.read()
+            result = await get_client().upload_bundle(
+                skill_id, version, file.filename or "bundle.zip", data
+            )
+            return _redirect(
+                f"/skills/{skill_id}",
+                f"Bundle uploaded: {result['file_count']} files, "
+                f"{result['total_size']} bytes.",
+            )
+        except MCPError as exc:
+            return _redirect(f"/skills/{skill_id}", str(exc), "error")
+
+    @app.get("/skills/{skill_id}/versions/{version}/files/{path:path}")
+    async def download_bundle_file(skill_id: str, version: str, path: str):
+        try:
+            data = await get_client().get_bundle_file(skill_id, version, path)
+            return Response(content=data, media_type="application/octet-stream")
+        except MCPError as exc:
+            return Response(content=str(exc), status_code=exc.status_code or 500)
 
     return app
 

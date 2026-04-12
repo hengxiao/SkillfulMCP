@@ -73,6 +73,21 @@ class SkillVersionInfo(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Skill bundle schemas
+# ---------------------------------------------------------------------------
+
+class BundleFileInfoResponse(BaseModel):
+    path: str
+    size: int
+    sha256: str
+
+
+class BundleUploadResponse(BaseModel):
+    file_count: int
+    total_size: int
+
+
+# ---------------------------------------------------------------------------
 # Skillset schemas
 # ---------------------------------------------------------------------------
 

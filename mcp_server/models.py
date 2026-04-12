@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -41,6 +42,27 @@ class Skill(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class SkillFile(Base):
+    """One file within a skill version's bundle.
+
+    See spec/skill-bundles.md for the storage model. The row doubles as the
+    metadata index and (for the SQLite prototype) the content store; moving
+    `content` to an object store later only affects this table.
+    """
+
+    __tablename__ = "skill_files"
+
+    skill_pk: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("skills.pk", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    path: Mapped[str] = mapped_column(String, primary_key=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class Skillset(Base):

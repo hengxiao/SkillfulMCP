@@ -100,6 +100,45 @@ class MCPClient:
         await self._request("DELETE", f"/skills/{skill_id}", params=params)
 
     # ------------------------------------------------------------------
+    # Bundles (admin endpoints)
+    # ------------------------------------------------------------------
+
+    async def list_bundle_files(self, skill_id: str, version: str) -> list[dict]:
+        return await self._request(
+            "GET", f"/admin/skills/{skill_id}/versions/{version}/files"
+        )
+
+    async def get_bundle_file(self, skill_id: str, version: str, path: str) -> bytes:
+        """Return raw bytes for a single file in a bundle."""
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=30) as c:
+            r = await c.get(
+                f"/admin/skills/{skill_id}/versions/{version}/files/{path}",
+                headers=self._headers,
+            )
+            r.raise_for_status()
+            return r.content
+
+    async def upload_bundle(
+        self, skill_id: str, version: str, filename: str, data: bytes
+    ) -> dict:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=60) as c:
+            r = await c.post(
+                f"/skills/{skill_id}/versions/{version}/bundle",
+                headers=self._headers,
+                files={"file": (filename, data, "application/octet-stream")},
+            )
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise MCPError(_extract_detail(exc), exc.response.status_code) from exc
+            return r.json()
+
+    async def delete_bundle(self, skill_id: str, version: str) -> None:
+        await self._request(
+            "DELETE", f"/skills/{skill_id}/versions/{version}/bundle"
+        )
+
+    # ------------------------------------------------------------------
     # Agents (counts only — for dashboard)
     # ------------------------------------------------------------------
 

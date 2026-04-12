@@ -16,6 +16,7 @@ The aim of this project is to explore the possibility of building an MCP server 
 - `jwt-access-control.md` — JWT design, claims, and access-control rules.
 - `agent-model.md` — agent types, capability boundaries, and skill delivery model.
 - `prototype.md` — first prototype design using Python + FastAPI + SQLAlchemy + SQLite and CLI options.
+- `skill-bundles.md` — storing and serving full skill bundles (SKILL.md plus supporting files) from the catalog.
 
 ## Scope
 

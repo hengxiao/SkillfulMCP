@@ -3,13 +3,17 @@ Admin-only read endpoints that the Web UI uses instead of the JWT-protected
 agent-facing endpoints.  All routes here require X-Admin-Key.
 """
 
+import mimetypes
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from ..catalog import get_skill_versions, list_skills_in_skillset
+from ..bundles import get_file, list_bundle
+from ..catalog import get_skill_version, get_skill_versions, list_skills_in_skillset
 from ..dependencies import get_db, require_admin
 from ..models import Skill
-from ..schemas import SkillResponse, SkillVersionInfo
+from ..schemas import BundleFileInfoResponse, SkillResponse, SkillVersionInfo
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -73,6 +77,57 @@ def get_skill_admin(
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
     return _to_response(skill)
+
+
+@router.get(
+    "/skills/{skill_id}/versions/{version}/files",
+    response_model=list[BundleFileInfoResponse],
+)
+def list_bundle_files_admin(
+    skill_id: str,
+    version: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """List files in a skill version's bundle (admin, no JWT)."""
+    skill = get_skill_version(db, skill_id, version)
+    if not skill:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill {skill_id!r} version {version!r} not found",
+        )
+    return [
+        BundleFileInfoResponse(path=f.path, size=f.size, sha256=f.sha256)
+        for f in list_bundle(db, skill.pk)
+    ]
+
+
+@router.get("/skills/{skill_id}/versions/{version}/files/{path:path}")
+def get_bundle_file_admin(
+    skill_id: str,
+    version: str,
+    path: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """Fetch a single bundle file (admin, no JWT)."""
+    skill = get_skill_version(db, skill_id, version)
+    if not skill:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill {skill_id!r} version {version!r} not found",
+        )
+    row = get_file(db, skill.pk, path)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"File {path!r} not found"
+        )
+    media_type, _enc = mimetypes.guess_type(path)
+    return Response(
+        content=row.content,
+        media_type=media_type or "application/octet-stream",
+        headers={"X-Content-SHA256": row.sha256},
+    )
 
 
 @router.get("/skillsets/{skillset_id}/skills", response_model=list[SkillResponse])

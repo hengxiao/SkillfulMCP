@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import semver
 
-from .models import Skill, Skillset, SkillSkillset
+from .models import Skill, SkillFile, Skillset, SkillSkillset
 from .schemas import SkillCreate, SkillsetCreate
 
 
@@ -132,6 +132,12 @@ def get_skill_versions(db: Session, skill_id: str) -> list[Skill]:
 
 
 def delete_skill_all(db: Session, skill_id: str) -> int:
+    # Capture pks before deleting rows so we can clean up bundle files.
+    pks = [pk for (pk,) in db.query(Skill.pk).filter(Skill.id == skill_id).all()]
+    if pks:
+        db.query(SkillFile).filter(SkillFile.skill_pk.in_(pks)).delete(
+            synchronize_session=False
+        )
     n = db.query(Skill).filter(Skill.id == skill_id).delete()
     # Also remove orphaned SkillSkillset rows (no CASCADE from Skill since no FK)
     db.query(SkillSkillset).filter(SkillSkillset.skill_id == skill_id).delete()
@@ -140,11 +146,17 @@ def delete_skill_all(db: Session, skill_id: str) -> int:
 
 
 def delete_skill_version(db: Session, skill_id: str, version: str) -> bool:
-    n = (
+    target = (
         db.query(Skill)
         .filter(Skill.id == skill_id, Skill.version == version)
-        .delete()
+        .first()
     )
+    if target is None:
+        return False
+    db.query(SkillFile).filter(SkillFile.skill_pk == target.pk).delete(
+        synchronize_session=False
+    )
+    n = db.query(Skill).filter(Skill.pk == target.pk).delete()
     if n == 0:
         return False
     # Remove SkillSkillset links if no versions remain
