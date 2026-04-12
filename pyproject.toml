@@ -21,6 +21,8 @@ dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.27",
     "anthropic>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -33,10 +35,11 @@ dev = [
 [project.scripts]
 mcp-server = "mcp_server.main:run"
 mcp-cli = "cli.main:app"
+webui-server = "webui.main:run"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mcp_server*", "cli*"]
+include = ["mcp_server*", "cli*", "webui*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

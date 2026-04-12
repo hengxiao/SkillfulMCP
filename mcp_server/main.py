@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from .config import get_settings
 from .database import init_db
-from .routers import agents, health, skillsets, skills, token
+from .routers import admin, agents, health, skillsets, skills, token
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -38,6 +38,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(skills.router)
     app.include_router(agents.router)
     app.include_router(skillsets.router)
+    app.include_router(admin.router)
 
     return app
 

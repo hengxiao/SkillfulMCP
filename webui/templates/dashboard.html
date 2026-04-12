@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SkillfulMCP{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-4">
+  <h2 class="mb-0 fw-bold">Dashboard</h2>
+</div>
+
+<div class="row g-4 mb-4">
+  <div class="col-sm-4">
+    <a href="/skillsets" class="text-decoration-none">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body d-flex align-items-center gap-3">
+          <div class="rounded-3 p-3 bg-primary bg-opacity-10">
+            <i class="bi bi-collection fs-2 text-primary"></i>
+          </div>
+          <div>
+            <div class="fs-1 fw-bold text-dark lh-1">{{ skillsets_count }}</div>
+            <div class="text-muted small">Skillsets</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-4">
+    <a href="/skills" class="text-decoration-none">
+      <div class="card border-0 shadow-sm h-100">
+        <div class="card-body d-flex align-items-center gap-3">
+          <div class="rounded-3 p-3 bg-success bg-opacity-10">
+            <i class="bi bi-lightning fs-2 text-success"></i>
+          </div>
+          <div>
+            <div class="fs-1 fw-bold text-dark lh-1">{{ skills_count }}</div>
+            <div class="text-muted small">Skills</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-sm-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="rounded-3 p-3 bg-warning bg-opacity-10">
+          <i class="bi bi-robot fs-2 text-warning"></i>
+        </div>
+        <div>
+          <div class="fs-1 fw-bold text-dark lh-1">{{ agents_count }}</div>
+          <div class="text-muted small">Agents</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom-0 pt-3">
+        <i class="bi bi-collection me-1 text-primary"></i> Quick actions — Skillsets
+      </div>
+      <div class="card-body">
+        <a href="/skillsets" class="btn btn-outline-primary me-2">
+          <i class="bi bi-list-ul me-1"></i>Manage skillsets
+        </a>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom-0 pt-3">
+        <i class="bi bi-lightning me-1 text-success"></i> Quick actions — Skills
+      </div>
+      <div class="card-body">
+        <a href="/skills" class="btn btn-outline-success me-2">
+          <i class="bi bi-list-ul me-1"></i>Manage skills
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

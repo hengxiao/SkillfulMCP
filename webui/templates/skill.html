@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}{{ skill.name }} — Skills — SkillfulMCP{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/skills">Skills</a></li>
+    <li class="breadcrumb-item active">{{ skill.id }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="mb-0 fw-bold"><i class="bi bi-lightning me-2 text-success"></i>{{ skill.name }}</h2>
+  <div class="d-flex align-items-center gap-2">
+    <code class="text-muted">{{ skill.id }}</code>
+    <span class="badge bg-success badge-mono fs-6">v{{ skill.version }}</span>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Left: edit form -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white fw-semibold border-bottom pt-3">
+        <i class="bi bi-pencil me-1"></i> Edit Latest Version (v{{ skill.version }})
+      </div>
+      <div class="card-body">
+        <form method="post" action="/skills/{{ skill.id }}/update">
+          <input type="hidden" name="version" value="{{ skill.version }}">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">ID</label>
+            <input type="text" class="form-control font-monospace bg-light" value="{{ skill.id }}" disabled>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+            <input type="text" name="name" class="form-control" value="{{ skill.name }}" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description</label>
+            <textarea name="description" class="form-control" rows="2">{{ skill.description or '' }}</textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Metadata <span class="text-muted fw-normal">(JSON)</span></label>
+            <textarea name="metadata" class="form-control metadata-area" rows="8">{{ metadata_json }}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-save me-1"></i>Save Changes
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Timestamps -->
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="row g-2 text-muted small">
+          <div class="col-6">
+            <div class="fw-semibold text-dark">Created</div>
+            {{ skill.created_at[:19].replace('T',' ') if skill.created_at else '—' }}
+          </div>
+          <div class="col-6">
+            <div class="fw-semibold text-dark">Updated</div>
+            {{ skill.updated_at[:19].replace('T',' ') if skill.updated_at else '—' }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: version history + add version -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-1"></i> Version History</span>
+        <span class="badge bg-secondary">{{ versions | length }}</span>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th class="text-end">Delete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in versions | sort(attribute='version', reverse=True) %}
+            <tr>
+              <td><span class="badge bg-light text-dark border badge-mono fs-6">{{ v.version }}</span></td>
+              <td>
+                {% if v.is_latest %}
+                <span class="badge bg-success">latest</span>
+                {% else %}
+                <span class="badge bg-secondary">old</span>
+                {% endif %}
+              </td>
+              <td class="text-muted small">{{ v.created_at[:19].replace('T',' ') if v.created_at else '—' }}</td>
+              <td class="text-end">
+                <button
+                  hx-delete="/skills/{{ skill.id }}/versions/{{ v.version }}"
+                  hx-target="closest tr"
+                  hx-swap="delete"
+                  hx-confirm="Delete version {{ v.version }}?{% if v.is_latest %} This is the latest version.{% endif %}"
+                  class="btn btn-sm btn-outline-danger">
+                  <i class="bi bi-trash"></i>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Add new version -->
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom-0 pt-3">
+        <i class="bi bi-plus-circle me-1 text-success"></i> Add New Version
+      </div>
+      <div class="card-body">
+        <form method="post" action="/skills/{{ skill.id }}/versions">
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Version <span class="text-danger">*</span></label>
+              <input type="text" name="version" class="form-control font-monospace"
+                     placeholder="e.g. 2.0.0" required pattern="\d+\.\d+\.\d+.*">
+            </div>
+            <div class="col-md-8">
+              <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+              <input type="text" name="name" class="form-control" value="{{ skill.name }}" required>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Description</label>
+            <input type="text" name="description" class="form-control" value="{{ skill.description or '' }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Metadata <span class="text-muted fw-normal">(JSON)</span></label>
+            <textarea name="metadata" class="form-control metadata-area" rows="5">{{ metadata_json }}</textarea>
+            <div class="form-text">Pre-filled from the latest version. Edit as needed.</div>
+          </div>
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-plus-lg me-1"></i>Add Version
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
