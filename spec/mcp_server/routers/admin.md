@@ -14,6 +14,8 @@ its own.
 | GET    | `/admin/skillsets/{skillset_id}/skills`                              | `list[SkillResponse]` — all skills in the skillset (no JWT filter) |
 | GET    | `/admin/skills/{skill_id}/versions/{version}/files`                  | `list[BundleFileInfoResponse]` |
 | GET    | `/admin/skills/{skill_id}/versions/{version}/files/{path:path}`      | Raw file bytes with `X-Content-SHA256` header |
+| POST   | `/admin/tokens/revoke`                                               | `{jti}` → 204. Revoke a token (Wave 4).       |
+| GET    | `/admin/tokens/revoked-count`                                        | `{count}` — current deny-list size.           |
 
 ## Why it exists
 

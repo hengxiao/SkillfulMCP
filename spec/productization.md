@@ -22,13 +22,17 @@ imagine running it in production.
   Anyone with the key can mutate any skill, skillset, or agent, including
   minting a JWT for any agent (`POST /token`). That is a root-equivalent
   secret and is unsuitable for multi-user or multi-tenant deployments.
-- **Agent JWTs are signed with a single static secret (`MCP_JWT_SECRET`)**,
-  HS256. Key rotation is manual and disruptive; there is no `kid` header and
-  no key-ring.
+- **~~Agent JWTs are signed with a single static secret (`MCP_JWT_SECRET`)~~**
+  **Addressed in Wave 4** — `MCP_JWT_KEYS` multi-key mode + `kid` header.
+  Legacy single-secret mode still works (wraps under `kid=primary`) so
+  existing deployments don't break; rotation is now possible with no
+  downtime.
 - **No concept of a user or tenant.** Skills, skillsets, and agents live in a
   single flat namespace.
-- **Tokens are not revocable mid-flight.** A compromised JWT is valid until
-  `exp`; there is no deny list or version counter.
+- **~~Tokens are not revocable mid-flight.~~** **Addressed in Wave 4** —
+  every token now carries a `jti`; `POST /admin/tokens/revoke` adds it to
+  the in-process deny list. Revoked tokens fail validation on the next
+  call. Shared state across replicas still TODO (needs Redis).
 - **`POST /token` accepts any `agent_id` that exists** once you present the
   admin key — there is no policy ("who can mint tokens for which agent").
 
@@ -161,14 +165,21 @@ order.
   that accepts an OIDC id token, validates `iss`/`aud`/`exp`, maps claims to
   roles, and populates `request.state.operator`.
 - **[P0] Move `POST /token` behind an operator session + policy.** Only a
-  `tenant_admin` can mint tokens for agents in their tenant, and only with a
-  bounded `expires_in` (e.g. ≤ 24h by default, configurable per tenant).
-- **[P1] Token revocation list.** Redis-backed set of revoked `jti`s;
-  validator checks on each request. TTL = token exp.
-- **[P1] Key-ring for JWT signing.** Support multiple active keys keyed by
-  `kid`; rotation is "add new key as primary, keep old key as verifier for
-  the deny period, then remove." Store keys in AWS KMS / Google KMS /
-  Azure Key Vault.
+  `tenant_admin` can mint tokens for agents in their tenant, and only with
+  a bounded `expires_in`. **Bounded `expires_in` SHIPPED in Wave 4** via
+  `MCP_MAX_TOKEN_LIFETIME_SECONDS` (default 24h); server-side clamps every
+  mint. Operator-session gating still TODO (waits for OIDC).
+- **[P1 — SHIPPED (in-process)] Token revocation list.** Every issued
+  token now carries a `jti`. `mcp_server/revocation.RevocationList` is an
+  in-process, thread-safe deny list with lazy TTL purge. Admin endpoint
+  `POST /admin/tokens/revoke` takes effect on the next request. Remaining:
+  Redis-backed storage for multi-replica correctness.
+- **[P1 — SHIPPED] Key-ring for JWT signing.** `mcp_server/keyring.KeyRing`
+  supports multi-key rotation via `MCP_JWT_KEYS` + `MCP_JWT_ACTIVE_KID`.
+  Tokens carry `kid` in the header; validation picks the matching secret.
+  Legacy `MCP_JWT_SECRET` still works (auto-wraps under `kid=primary`).
+  Remaining: KMS-backed asymmetric keys (RS256 / ES256) and JWKS endpoint
+  for external verifiers.
 - **[P1] Per-agent scope policies.** Extend the `agents` table with a
   `policy` JSON blob; enforce during token mint (e.g. "agents of role=X
   can only hold skillsets tagged as public").

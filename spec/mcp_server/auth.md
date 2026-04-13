@@ -1,73 +1,124 @@
 # mcp_server/auth.py
 
-JWT issuance and validation. Built on `python-jose`.
+JWT issuance and validation. Built on `python-jose`, backed by
+`KeyRing` + `RevocationList`.
 
-## `issue_token(agent: Agent, expires_in: int = 3600) -> str`
+## `TokenService`
+
+The primary class. One per process (lazily constructed via
+`get_default_service()`).
+
+```python
+TokenService(
+    keyring: KeyRing,
+    revocation: RevocationList,
+    *,
+    issuer: str,
+    max_lifetime_seconds: int,
+)
+```
+
+### `issue_token(agent, expires_in=3600) -> str`
 
 Claims layout:
 
 ```python
 {
     "sub":       agent.id,
-    "iss":       settings.jwt_issuer,          # default "mcp-server"
-    "iat":       <now, unix seconds>,
-    "exp":       <now + expires_in>,
-    "skillsets": agent.skillsets or [],        # list[str]
-    "skills":    agent.skills or [],           # list[str]
-    "scope":     agent.scope or [],            # list[str], e.g. ["read", "execute"]
+    "iss":       self.issuer,
+    "iat":       int(now.timestamp()),
+    "exp":       int((now + timedelta(seconds=capped)).timestamp()),
+    "jti":       "<uuid4-hex>",
+    "skillsets": agent.skillsets or [],
+    "skills":    agent.skills or [],
+    "scope":     agent.scope or [],
 }
 ```
 
-Signed with `settings.jwt_secret`, algorithm `settings.jwt_algorithm`
-(default `HS256`).
+`expires_in` is clamped to `[1, max_lifetime_seconds]`. A clamp that
+changed the value is logged at INFO level so ops can spot clients that
+ask for longer than policy allows. `jti` is a fresh UUID4 per call.
 
-**Deliberate omissions from the prototype**:
-- No `jti` → no replay protection / revocation handle.
-- No `aud` → every service that trusts this issuer accepts the token.
-- No `kid` → no key rotation support.
+Signed with `keyring.active_secret`, algorithm `keyring.algorithm`;
+the JWT header carries `kid: keyring.active_kid` so verifiers can pick
+the right secret during rotation.
 
-Productization §3.1 lists these as P1 items.
+### `validate_token(token) -> dict`
 
-## `validate_token(token: str) -> dict`
+1. Read `kid` from the unverified header. Unknown kid → 401
+   `"Unknown signing key kid=…"`.
+2. Verify signature + `exp` + issuer match. Failures → 401.
+3. Check `jti` against the revocation list. Revoked → 401 `"Token has
+   been revoked"`.
+4. Return decoded claims.
 
-1. `jose.jwt.decode(token, secret, algorithms=[alg], options={"verify_exp": True})`.
-2. If decode raises `JWTError` → HTTP 401 with `WWW-Authenticate: Bearer`.
-3. If `claims["iss"] != settings.jwt_issuer` → HTTP 401.
-4. Return claims dict.
+Malformed tokens (not a real JWT) raise 401 at step 1.
 
-Consumed by `dependencies.get_current_claims`.
+## Module-level shims — backwards compatibility
+
+```python
+issue_token(agent, expires_in=3600) -> str
+validate_token(token) -> dict
+```
+
+Thin wrappers that delegate to `get_default_service()`. `tests/test_auth.py`
+and the legacy public API use these; nothing else calls them.
+
+### `get_default_service() -> TokenService`
+
+Returns the process-wide default. Built lazily on first call from
+`get_settings()`:
+- `build_keyring(settings)` for the ring.
+- `RevocationList()` for the deny list.
+- `issuer = settings.jwt_issuer`
+- `max_lifetime_seconds = settings.max_token_lifetime_seconds`
+
+### `reset_default_service()`
+
+Clears the cached singleton. Called by the `_reset_auth_singleton` autouse
+fixture in `conftest.py` so revocation state doesn't leak between tests.
 
 ## Token lifecycle
 
-1. Operator registers an `Agent` with skill grants (via admin API).
-2. Operator calls `POST /token` (admin-gated) to mint a JWT for that agent.
-3. Agent stores the token and presents it as `Authorization: Bearer …` on
-   every catalog read.
-4. `GET /skills` filters by claims via `authorization.resolve_allowed_skill_ids`.
-5. Token expires → agent must request a new one (no refresh endpoint in the
-   prototype).
+1. Operator creates an `Agent` via admin API.
+2. Operator mints a token: `POST /token` with `{agent_id, expires_in}`.
+   `expires_in` clamped server-side.
+3. Token carries `kid` (header) + `jti` (claim).
+4. Every protected endpoint runs through `validate_token` → key lookup →
+   signature check → revocation check → claims.
+5. Token expires on `exp`, or is revoked early via
+   `POST /admin/tokens/revoke {jti}`.
 
-## Threat model (prototype-level)
+## Threat model
 
-- **Secret theft** → full impersonation. Secret lives in env; rotate by
-  restart + new `MCP_JWT_SECRET`. All existing tokens invalidate.
-- **Token theft** → agent impersonation until `exp`. No revocation.
-- **Replay** → possible until `exp`; mitigate with short `expires_in`.
-- **Algorithm confusion** → not specifically guarded; relies on
-  `algorithms=[settings.jwt_algorithm]` restricting the decoder.
+- **Secret theft in legacy mode** → full impersonation until
+  `MCP_JWT_SECRET` is rotated. All tokens become invalid on rotation.
+- **Secret theft in multi-key mode** → rotate the affected `kid`
+  (remove from `MCP_JWT_KEYS`, deploy). Tokens signed with the stolen
+  kid stop verifying; tokens signed with any other kid keep working.
+- **Token theft** → revoke the `jti`. `POST /admin/tokens/revoke`. Takes
+  effect on the next request (no TTL wait).
+- **Algorithm confusion** → mitigated by `algorithms=[keyring.algorithm]`
+  on decode; no "alg=none" or RS→HS confusion path.
 
 ## Testing
 
-`tests/test_auth.py` covers:
-- round-trip issue → validate
-- expired token rejection
-- signature mismatch (wrong secret) → 401
-- issuer mismatch → 401
-- tampered payload → signature fail → 401
+- `tests/test_auth.py` (existing, 13 tests) — issuance/validation round-
+  trip, expiry, tamper, issuer mismatch.
+- `tests/test_keyring_revocation.py` (new, 21 tests) — keyring modes,
+  revocation list, jti presence, kid routing (including rotation where
+  an old-kid token still verifies), `expires_in` clamp, admin revoke
+  endpoint.
 
 ## Future work
 
-- RS256 + key-ring with `kid` lookups.
-- `jti` + Redis deny-list for revocation.
-- Refresh-token flow.
-- Bounded `expires_in` enforced server-side per-agent policy.
+- **RS256 + KMS-backed keys** — asymmetric signing so verifiers can hold
+  public keys without the signer's secret.
+- **`aud` claim** — scope tokens to specific audiences (services).
+- **Refresh tokens** — short `access_token` + long-lived `refresh_token`
+  with dedicated endpoint.
+- **Agent-level "revoke all tokens"** — `not_before` epoch on the agent
+  row; validate reject if `iat < not_before`.
+- **Stricter `scope` enforcement** — today `scope` is stored but not
+  checked at validation. Bundle download should require `execute`; metadata
+  reads get `read`.

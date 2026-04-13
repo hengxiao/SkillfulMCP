@@ -9,9 +9,12 @@ failure mode on a missing `MCP_JWT_SECRET` is obvious).
 
 | Attribute         | Env var              | Default                            | Required |
 | ----------------- | -------------------- | ---------------------------------- | -------- |
-| `jwt_secret`      | `MCP_JWT_SECRET`     | —                                  | Yes (raises at init if empty) |
+| `jwt_secret`      | `MCP_JWT_SECRET`     | —                                  | Legacy single-key mode. Either this OR `MCP_JWT_KEYS` must be set at init. |
+| `jwt_keys_raw`    | `MCP_JWT_KEYS`       | —                                  | Multi-key rotation mode. JSON `{kid: secret}`. |
+| `jwt_active_kid`  | `MCP_JWT_ACTIVE_KID` | `"primary"`                        | Which kid signs new tokens (multi-key mode). |
 | `jwt_issuer`      | `MCP_JWT_ISSUER`     | `"mcp-server"`                     |          |
 | `jwt_algorithm`   | `MCP_JWT_ALGORITHM`  | `"HS256"`                          |          |
+| `max_token_lifetime_seconds` | `MCP_MAX_TOKEN_LIFETIME_SECONDS` | `86400` | Server-side clamp on token `expires_in`. |
 | `admin_key`       | `MCP_ADMIN_KEY`      | `""`                               | Used by `require_admin`; empty value disables the admin-key check, which is fine for local dev only |
 | `database_url`    | `MCP_DATABASE_URL`   | `"sqlite:///./skillful_mcp.db"`    |          |
 | `rate_limit_per_minute` | `MCP_RATE_LIMIT_PER_MINUTE` | `600`                    | Per-IP requests-per-minute. `0` disables the limiter. Tests set it to `0`. |

@@ -78,9 +78,30 @@ class TestIssueToken:
 
 class TestValidateToken:
     def test_expired_token_raises_http_401(self):
+        from datetime import datetime, timedelta, timezone
+
         from fastapi import HTTPException
-        agent = _make_agent()
-        token = issue_token(agent, expires_in=-1)
+        from jose import jwt
+
+        from mcp_server.config import get_settings
+
+        # issue_token clamps expires_in to >= 1 (negative is nonsense). To
+        # test expired-token handling we hand-build a JWT with a past `exp`.
+        settings = get_settings()
+        past = datetime.now(timezone.utc) - timedelta(seconds=60)
+        token = jwt.encode(
+            {
+                "sub": "agent-test",
+                "iss": settings.jwt_issuer,
+                "iat": int((past - timedelta(seconds=1)).timestamp()),
+                "exp": int(past.timestamp()),
+                "jti": "expired-jti",
+                "skillsets": [], "skills": [], "scope": [],
+            },
+            settings.jwt_secret,
+            algorithm=settings.jwt_algorithm,
+            headers={"kid": "primary"},
+        )
         with pytest.raises(HTTPException) as exc_info:
             validate_token(token)
         assert exc_info.value.status_code == 401

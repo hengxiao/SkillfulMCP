@@ -22,10 +22,25 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from mcp_server.auth import reset_default_service
 from mcp_server.config import get_settings
 from mcp_server.database import init_db
 from mcp_server.main import create_app
 from mcp_server.models import Base
+
+
+# ---------------------------------------------------------------------------
+# Autouse: reset the auth singleton between tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_auth_singleton():
+    """Clear the module-level TokenService between tests so revocation
+    state doesn't leak across cases. Also lets a test that sets
+    MCP_JWT_KEYS via monkeypatch get a fresh keyring."""
+    reset_default_service()
+    yield
+    reset_default_service()
 
 # ---------------------------------------------------------------------------
 # Constants used across tests

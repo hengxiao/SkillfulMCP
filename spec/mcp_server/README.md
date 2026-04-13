@@ -12,7 +12,9 @@ These are implementation-level docs; the high-level design lives in
 | `config.py`                   | [config.md](config.md)                                  | `Settings` class and `get_settings()` (cached)               |
 | `database.py`                 | [database.md](database.md)                              | Engine creation, session factory, DDL bootstrap              |
 | `dependencies.py`             | [dependencies.md](dependencies.md)                      | Request-scoped deps (`get_db`, `get_current_claims`, `require_admin`) |
-| `auth.py`                     | [auth.md](auth.md)                                      | JWT issuance and validation                                  |
+| `auth.py`                     | [auth.md](auth.md)                                      | `TokenService`; JWT issuance + validation + revocation       |
+| `keyring.py`                  | [keyring.md](keyring.md)                                | Signing-key ring (legacy + multi-key rotation modes)         |
+| `revocation.py`               | [revocation.md](revocation.md)                          | In-process `jti` deny list                                   |
 | `authorization.py`            | [authorization.md](authorization.md)                    | Token-claim → allowed-skill-id resolution                    |
 | `models.py`                   | [models.md](models.md)                                  | SQLAlchemy ORM tables                                        |
 | `schemas.py`                  | [schemas.md](schemas.md)                                | Pydantic request / response schemas                          |

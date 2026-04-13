@@ -7,13 +7,18 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..auth import get_default_service
 from ..bundles import get_file, list_bundle
 from ..catalog import get_skill_version, get_skill_versions, list_skills_in_skillset
 from ..dependencies import get_db, require_admin
+from ..logging_config import get_logger
 from ..models import Skill
 from ..schemas import BundleFileInfoResponse, SkillResponse, SkillVersionInfo
+
+_log = get_logger("mcp.admin")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -143,3 +148,38 @@ def list_skillset_skills_admin(
     """List all skills in a skillset (admin, no JWT required)."""
     skills = list_skills_in_skillset(db, skillset_id)
     return [_to_response(s) for s in skills]
+
+
+# ---------------------------------------------------------------------------
+# Token revocation
+# ---------------------------------------------------------------------------
+
+class _RevokeRequest(BaseModel):
+    jti: str
+
+
+@router.post("/tokens/revoke", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_token(
+    body: _RevokeRequest,
+    _: None = Depends(require_admin),
+):
+    """Add a `jti` to the in-process revocation list.
+
+    No-op if the jti is unknown (idempotent; also avoids an information-
+    disclosure oracle about which jtis exist). Entries auto-expire 24h
+    after insertion.
+    """
+    if not body.jti:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="jti is required",
+        )
+    service = get_default_service()
+    service.revocation.revoke(body.jti)
+    _log.info("token revoked", extra={"jti": body.jti})
+
+
+@router.get("/tokens/revoked-count")
+def revoked_count(_: None = Depends(require_admin)):
+    """How many jtis are currently on the revocation list. Useful for dashboards."""
+    return {"count": len(get_default_service().revocation)}
