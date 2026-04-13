@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import accounts as acct_svc
+from .. import audit as audit_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
 from ..models import Agent, Skill, SkillShare, Skillset, SkillsetShare
@@ -86,6 +87,19 @@ def move_skill(
     )
     db.commit()
 
+    audit_svc.record(
+        db,
+        action="catalog.moved",
+        account_id=body.target_account_id,
+        target_kind="skill",
+        target_id=skill_id,
+        diff={
+            "from_account_ids": sorted(prev_account_ids),
+            "to_account_id": body.target_account_id,
+            "versions_moved": len(versions),
+            "shares_wiped": shares_deleted,
+        },
+    )
     _log.info(
         "catalog.moved",
         extra={
@@ -135,6 +149,18 @@ def move_skillset(
     )
     db.commit()
 
+    audit_svc.record(
+        db,
+        action="catalog.moved",
+        account_id=body.target_account_id,
+        target_kind="skillset",
+        target_id=skillset_id,
+        diff={
+            "from_account_id": prev,
+            "to_account_id": body.target_account_id,
+            "shares_wiped": shares_deleted,
+        },
+    )
     _log.info(
         "catalog.moved",
         extra={
@@ -178,6 +204,17 @@ def move_agent(
     agent.owner_email_snapshot = None
     db.commit()
 
+    audit_svc.record(
+        db,
+        action="catalog.moved",
+        account_id=body.target_account_id,
+        target_kind="agent",
+        target_id=agent_id,
+        diff={
+            "from_account_id": prev,
+            "to_account_id": body.target_account_id,
+        },
+    )
     _log.info(
         "catalog.moved",
         extra={

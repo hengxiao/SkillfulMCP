@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from .. import accounts as acct_svc
+from .. import audit as audit_svc
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -103,6 +104,15 @@ def create_account(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         )
+    audit_svc.record(
+        db,
+        action="account.created",
+        account_id=a.id,
+        target_kind="account",
+        target_id=a.id,
+        diff={"name": a.name,
+              "initial_admin_user_id": body.initial_admin_user_id},
+    )
     return _account_to_response(a)
 
 
@@ -184,6 +194,20 @@ def delete_account(
     if not acct_svc.delete_account(db, account_id):
         # Race: row vanished between the fetch and the delete.
         raise HTTPException(status_code=404, detail="Account not found")
+    audit_svc.record(
+        db,
+        action="account.deleted",
+        account_id=account_id,
+        target_kind="account",
+        target_id=account_id,
+        diff={
+            "confirm_user_count": confirm_user_count,
+            "confirm_skill_count": confirm_skill_count,
+            "confirm_skillset_count": confirm_skillset_count,
+            "confirm_agent_count": confirm_agent_count,
+            "cascade_catalog": bool(cascade_catalog),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +284,14 @@ def invite_member(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=str(exc)
             )
+        audit_svc.record(
+            db,
+            action="membership.added",
+            account_id=account_id,
+            target_kind="user",
+            target_id=existing_user.id,
+            diff={"email": existing_user.email, "role": body.role},
+        )
         return _membership_to_response(
             m,
             email=existing_user.email,
@@ -275,6 +307,14 @@ def invite_member(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         )
+    audit_svc.record(
+        db,
+        action="membership.invited",
+        account_id=account_id,
+        target_kind="email",
+        target_id=p.email,
+        diff={"role": body.role, "pending_id": p.id},
+    )
     return _pending_to_response(p).model_dump()
 
 
@@ -289,6 +329,11 @@ def update_membership_role(
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
 ):
+    # Snapshot current role so the audit diff captures the transition.
+    previous = acct_svc.get_membership(
+        db, account_id=account_id, user_id=user_id
+    )
+    from_role = previous.role if previous else None
     try:
         m = acct_svc.update_membership_role(
             db, account_id=account_id, user_id=user_id, new_role=body.role
@@ -300,6 +345,15 @@ def update_membership_role(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         )
     u = user_svc.get_user(db, user_id)
+    audit_svc.record(
+        db,
+        action="membership.role_changed",
+        account_id=account_id,
+        target_kind="user",
+        target_id=user_id,
+        diff={"from_role": from_role, "to_role": body.role,
+              "target_email": u.email},
+    )
     return _membership_to_response(
         m, email=u.email, display_name=u.display_name, disabled=u.disabled
     )
@@ -348,6 +402,14 @@ def remove_member(
         )
     if not removed:
         raise HTTPException(status_code=404, detail="Membership not found")
+    audit_svc.record(
+        db,
+        action="membership.removed",
+        account_id=account_id,
+        target_kind="user",
+        target_id=user_id,
+        diff={"new_owner_id": new_owner_id},
+    )
 
 
 @router.get(

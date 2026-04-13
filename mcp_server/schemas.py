@@ -468,3 +468,21 @@ class RemovalPreviewResponse(BaseModel):
     owns_agents: int
     default_target: RemovalPreviewTarget | None = None
     target_members: list[RemovalPreviewTarget] = []
+
+
+# ---------------------------------------------------------------------------
+# Audit events (item H)
+# ---------------------------------------------------------------------------
+
+class AuditEventResponse(BaseModel):
+    id: int
+    ts: datetime
+    actor_email: str | None = None
+    actor_user_id: str | None = None
+    action: str
+    account_id: str | None = None
+    target_kind: str | None = None
+    target_id: str | None = None
+    diff: dict | None = None
+
+    model_config = {"from_attributes": True}

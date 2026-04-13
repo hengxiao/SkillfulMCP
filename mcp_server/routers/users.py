@@ -21,6 +21,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from .. import audit as audit_svc
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -147,6 +148,13 @@ def disable_user(
     _log.info(
         "user.disabled_flag_changed",
         extra={"user_id": user_id, "disabled": body.disabled},
+    )
+    audit_svc.record(
+        db,
+        action="user.disabled_flag_changed",
+        target_kind="user",
+        target_id=user_id,
+        diff={"disabled": body.disabled, "target_email": u.email},
     )
     return _to_response(u)
 

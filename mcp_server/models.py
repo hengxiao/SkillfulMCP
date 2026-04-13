@@ -287,6 +287,37 @@ class PendingMembership(Base):
     )
 
 
+class AuditEvent(Base):
+    """Append-only audit trail for forensics (item H).
+
+    Written by `mcp_server.audit.record()`. Every write-class
+    superadmin action, membership mutation, catalog move, and
+    user-lifecycle event emits one row. Structured `diff` JSON
+    carries op-specific details (old/new roles, resource ids, etc.)
+    so the Web UI and log aggregators can render the event without
+    a separate enrichment step.
+    """
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+        index=True,
+    )
+    actor_email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # Nullable: platform-level events (superadmin login, account
+    # create) aren't scoped to a tenant.
+    account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    diff: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
 class SkillShare(Base):
     """Email-keyed allow-list entry for a skill (Wave 9.4).
 

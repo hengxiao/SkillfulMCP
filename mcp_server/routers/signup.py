@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import accounts as acct_svc
+from .. import audit as audit_svc
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -88,6 +89,15 @@ def signup(
             "email": u.email,
             "invited_memberships": consumed_ids,
         },
+    )
+    audit_svc.record(
+        db,
+        action="user.signup",
+        actor_email=u.email,
+        actor_user_id=u.id,
+        target_kind="user",
+        target_id=u.id,
+        diff={"invited_memberships": consumed_ids},
     )
     return SignupResponse(
         id=u.id,
