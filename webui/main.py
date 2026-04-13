@@ -41,6 +41,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import (
+    Operator,
     authenticate,
     authenticate_via_server,
     clear_session,
@@ -716,6 +717,246 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ #
     # Bundle file fetch (for the viewer modal)                            #
     # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Accounts (Wave 9.5)                                                 #
+    # ------------------------------------------------------------------ #
+
+    async def _memberships_for(op: Operator | None) -> list[dict]:
+        """Fetch the caller's membership rows from every account they
+        belong to. Returns an empty list for unauth'd / env-fallback /
+        superadmin sessions (superadmins are NOT members of any
+        account; they see all accounts via the same /admin/accounts
+        list surface).
+
+        Re-fetched per request (spec §3.3 — no session cache), so
+        role changes elsewhere propagate on the next click."""
+        if op is None or op.is_superadmin or not op.user_id:
+            return []
+        try:
+            accounts = await get_client().list_accounts()
+        except MCPError:
+            return []
+        # Check membership in each. N*1 queries; accounts are typically
+        # small (<20 per operator) so cost is fine.
+        mine: list[dict] = []
+        for a in accounts:
+            try:
+                members = await get_client().list_members(a["id"])
+            except MCPError:
+                continue
+            for m in members:
+                if m.get("pending"):
+                    continue
+                if m.get("user_id") == op.user_id:
+                    mine.append({
+                        "account_id": a["id"],
+                        "account_name": a["name"],
+                        "role": m.get("role", "viewer"),
+                    })
+                    break
+        return mine
+
+    async def _ensure_active_account(request: Request) -> Operator | None:
+        """Stamp active_account_id on first request after login.
+
+        Picks the caller's first membership. If they have none, leaves
+        active_account_id as None and the Web UI renders a "no
+        accounts yet" banner.
+        """
+        op = get_session_operator(request)
+        if op is None or op.is_superadmin:
+            return op
+        if op.active_account_id:
+            return op
+        mems = await _memberships_for(op)
+        if mems:
+            new_op = Operator(
+                email=op.email,
+                role=op.role,
+                user_id=op.user_id,
+                is_superadmin=op.is_superadmin,
+                active_account_id=mems[0]["account_id"],
+            )
+            set_session_operator(request, new_op)
+            return new_op
+        return op
+
+    @app.get("/accounts", response_class=HTMLResponse)
+    async def accounts_page(request: Request, msg: str = "", msg_type: str = "success"):
+        op = get_session_operator(request)
+        if op is None:
+            return _redirect("/login", "Sign in to view accounts.", "error")
+        # Superadmin sees every account; regular users see only
+        # accounts they're a member of.
+        try:
+            if op.is_superadmin:
+                accounts = await get_client().list_accounts()
+                my_role_by_account: dict[str, str] = {}
+            else:
+                mems = await _memberships_for(op)
+                my_role_by_account = {m["account_id"]: m["role"] for m in mems}
+                # Fetch full rows for the accounts they're in.
+                all_accounts = await get_client().list_accounts()
+                accounts = [a for a in all_accounts if a["id"] in my_role_by_account]
+            error = None
+        except MCPError as exc:
+            accounts, my_role_by_account, error = [], {}, str(exc)
+        return _render(request, "accounts.html", {
+            "active": "accounts",
+            "accounts": accounts,
+            "my_role_by_account": my_role_by_account,
+            "error": error,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.get("/accounts/new", response_class=HTMLResponse)
+    async def account_new_page(request: Request):
+        op = get_session_operator(request)
+        if op is None:
+            return _redirect("/login", "Sign in first.", "error")
+        if op.is_superadmin:
+            # Superadmin has no users.id to anchor the first
+            # membership to — they'd either need an existing user to
+            # promote, or this flow is inappropriate. Redirect back
+            # to /accounts with an explanation.
+            return _redirect(
+                "/accounts",
+                "Superadmin cannot create accounts; log in as a regular user.",
+                "error",
+            )
+        return _render(request, "account_new.html", {"active": "accounts"})
+
+    @app.post("/accounts", dependencies=CSRF)
+    async def create_account(
+        request: Request,
+        name: Annotated[str, Form()],
+    ):
+        op = get_session_operator(request)
+        if op is None or op.is_superadmin or not op.user_id:
+            return _redirect("/accounts", "Sign in as a regular user first.", "error")
+        try:
+            acct = await get_client().create_account(
+                name=name, initial_admin_user_id=op.user_id
+            )
+        except MCPError as exc:
+            return _redirect("/accounts/new", str(exc), "error")
+        # Stamp the new account as active so the next page load
+        # lands the user inside it.
+        new_op = Operator(
+            email=op.email, role=op.role, user_id=op.user_id,
+            is_superadmin=op.is_superadmin, active_account_id=acct["id"],
+        )
+        set_session_operator(request, new_op)
+        return _redirect(
+            f"/accounts/{acct['id']}", f"Account '{acct['name']}' created."
+        )
+
+    @app.get("/accounts/{account_id}", response_class=HTMLResponse)
+    async def account_detail_page(
+        request: Request, account_id: str,
+        msg: str = "", msg_type: str = "success",
+    ):
+        op = get_session_operator(request)
+        if op is None:
+            return _redirect("/login", "Sign in first.", "error")
+        try:
+            acct = await get_client().get_account(account_id)
+            members = await get_client().list_members(account_id)
+            error = None
+        except MCPError as exc:
+            return _redirect("/accounts", str(exc), "error")
+        # Caller's own role in this account — drives which controls render.
+        mems = await _memberships_for(op)
+        my_role = next(
+            (m["role"] for m in mems if m["account_id"] == account_id),
+            None,
+        )
+        can_manage = op.is_superadmin or my_role == "account-admin"
+        return _render(request, "account_detail.html", {
+            "active": "accounts",
+            "account": acct,
+            "members": members,
+            "my_role": my_role,
+            "can_manage": can_manage,
+            "error": error,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.post("/accounts/{account_id}/members", dependencies=CSRF)
+    async def invite_member(
+        request: Request,
+        account_id: str,
+        email: Annotated[str, Form()],
+        role: Annotated[str, Form()],
+    ):
+        try:
+            await get_client().invite_member(account_id, email=email, role=role)
+        except MCPError as exc:
+            return _redirect(f"/accounts/{account_id}", str(exc), "error")
+        return _redirect(f"/accounts/{account_id}", f"Invited {email} as {role}.")
+
+    @app.post("/accounts/{account_id}/members/{user_id}/role",
+              dependencies=CSRF)
+    async def update_member_role(
+        request: Request,
+        account_id: str, user_id: str,
+        role: Annotated[str, Form()],
+    ):
+        try:
+            await get_client().update_member_role(account_id, user_id, role)
+        except MCPError as exc:
+            return _redirect(f"/accounts/{account_id}", str(exc), "error")
+        return _redirect(f"/accounts/{account_id}", "Role updated.")
+
+    @app.delete("/accounts/{account_id}/members/{user_id}",
+                dependencies=CSRF)
+    async def remove_member(
+        request: Request, account_id: str, user_id: str,
+    ):
+        try:
+            await get_client().remove_member(account_id, user_id)
+            return Response(status_code=200)
+        except MCPError as exc:
+            return Response(content=exc.detail, status_code=exc.status_code or 500)
+
+    @app.delete("/accounts/{account_id}/pending/{pending_id}",
+                dependencies=CSRF)
+    async def revoke_pending(
+        request: Request, account_id: str, pending_id: int,
+    ):
+        try:
+            await get_client().delete_pending_invite(account_id, pending_id)
+            return Response(status_code=200)
+        except MCPError as exc:
+            return Response(content=exc.detail, status_code=exc.status_code or 500)
+
+    @app.post("/session/switch-account", dependencies=CSRF)
+    async def switch_account(
+        request: Request,
+        account_id: Annotated[str, Form()],
+        next: Annotated[str, Form()] = "/",
+    ):
+        op = get_session_operator(request)
+        if op is None:
+            return _redirect("/login", "Sign in first.", "error")
+        # Verify the caller is a member of the requested account
+        # (superadmin bypass stays).
+        if not op.is_superadmin:
+            mems = await _memberships_for(op)
+            if not any(m["account_id"] == account_id for m in mems):
+                return _redirect(
+                    "/accounts",
+                    "You are not a member of that account.",
+                    "error",
+                )
+        new_op = Operator(
+            email=op.email, role=op.role, user_id=op.user_id,
+            is_superadmin=op.is_superadmin, active_account_id=account_id,
+        )
+        set_session_operator(request, new_op)
+        safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+        return RedirectResponse(safe_next, status_code=303)
 
     # ------------------------------------------------------------------ #
     # Agents + token issuance (Wave 8c)                                   #

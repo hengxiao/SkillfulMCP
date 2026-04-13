@@ -51,6 +51,11 @@ class Operator:
     # (superadmin@skillfulmcp.com). Templates that want to show
     # platform-admin-only UI should gate on this, not on `role`.
     is_superadmin: bool = False
+    # Wave 9.5: the account the operator is currently "inside" —
+    # stamped at login, updated by POST /session/switch-account.
+    # None for superadmins who haven't picked a tenant yet, or for
+    # env-fallback operators (pre-Wave-9.0 pool).
+    active_account_id: str | None = None
 
 
 # Re-exported from mcp_server.pwhash so existing imports keep working.
@@ -115,6 +120,12 @@ async def authenticate_via_server(email: str, password: str) -> Operator | None:
         role="admin",
         user_id=data.get("id"),
         is_superadmin=bool(data.get("is_superadmin", False)),
+        # Wave 9.5: active_account_id is picked on first request
+        # from the server — the authenticate endpoint doesn't return
+        # it today, but the user landing page fills it in by reading
+        # their membership list and picking the first one (see
+        # webui.main._ensure_active_account).
+        active_account_id=None,
     )
 
 
@@ -134,6 +145,7 @@ def get_session_operator(request: Request) -> Operator | None:
         role=raw.get("role", "admin"),
         user_id=raw.get("user_id"),
         is_superadmin=bool(raw.get("is_superadmin", False)),
+        active_account_id=raw.get("active_account_id"),
     )
 
 
@@ -143,6 +155,7 @@ def set_session_operator(request: Request, op: Operator) -> None:
         "role": op.role,
         "user_id": op.user_id,
         "is_superadmin": op.is_superadmin,
+        "active_account_id": op.active_account_id,
     }
     # A new login gets a fresh CSRF token so a leaked pre-login token
     # cannot be replayed after auth.

@@ -156,6 +156,9 @@
     <a class="nav-link {% if active == 'agents' %}active{% endif %}" href="/agents">
       <i class="bi bi-robot"></i><span>Agents</span>
     </a>
+    <a class="nav-link {% if active == 'accounts' %}active{% endif %}" href="/accounts">
+      <i class="bi bi-building"></i><span>Accounts</span>
+    </a>
     {% if operator.role == 'admin' %}
     <a class="nav-link {% if active == 'users' %}active{% endif %}" href="/users">
       <i class="bi bi-people"></i><span>Users</span>
@@ -170,8 +173,19 @@
     {% if operator %}
       <div class="mb-2 text-truncate" title="{{ operator.email }}">
         <i class="bi bi-person-circle me-1"></i>{{ operator.email }}
-        <span class="badge bg-secondary ms-1">{{ operator.role }}</span>
+        {% if operator.is_superadmin %}
+        <span class="badge bg-warning text-dark ms-1">SUPERADMIN</span>
+        {% endif %}
       </div>
+      {% if operator.active_account_id %}
+      <div class="mb-2 small text-truncate" style="opacity: .75;"
+           title="active account id: {{ operator.active_account_id }}">
+        <i class="bi bi-building me-1"></i>
+        <a href="/accounts" class="text-decoration-none text-light">
+          switch account
+        </a>
+      </div>
+      {% endif %}
       <form method="post" action="/logout" class="m-0">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="btn btn-sm btn-outline-light w-100">

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Accounts — SkillfulMCP{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="mb-0 fw-bold"><i class="bi bi-building me-2 text-primary"></i>Accounts</h2>
+  {% if operator and not operator.is_superadmin %}
+  <a href="/accounts/new" class="btn btn-primary">
+    <i class="bi bi-plus-lg me-1"></i>New account
+  </a>
+  {% endif %}
+</div>
+
+{% if operator and operator.is_superadmin %}
+<p class="text-muted small">
+  <i class="bi bi-shield-check me-1"></i>
+  Signed in as the platform superadmin — every account is listed
+  here. Use the member invite flow on a specific account to manage
+  users inside it.
+</p>
+{% endif %}
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if accounts %}
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Name</th>
+          <th>Created</th>
+          {% if not operator.is_superadmin %}<th>My role</th>{% endif %}
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in accounts %}
+        <tr>
+          <td><a href="/accounts/{{ a.id }}" class="text-decoration-none">
+            <strong>{{ a.name }}</strong>
+          </a></td>
+          <td class="text-muted small">
+            {{ a.created_at[:19].replace('T', ' ') if a.created_at else '—' }}
+          </td>
+          {% if not operator.is_superadmin %}
+          <td>
+            {% set r = my_role_by_account.get(a.id) %}
+            {% if r == 'account-admin' %}
+              <span class="badge bg-primary">account-admin</span>
+            {% elif r == 'contributor' %}
+              <span class="badge bg-success">contributor</span>
+            {% elif r == 'viewer' %}
+              <span class="badge bg-secondary">viewer</span>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+          {% endif %}
+          <td class="text-end">
+            <a href="/accounts/{{ a.id }}" class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-eye"></i> Open
+            </a>
+            {% if operator.active_account_id != a.id %}
+            <form method="post" action="/session/switch-account"
+                  class="d-inline ms-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="account_id" value="{{ a.id }}">
+              <input type="hidden" name="next" value="/accounts/{{ a.id }}">
+              <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-arrow-repeat"></i> Switch
+              </button>
+            </form>
+            {% else %}
+            <span class="badge bg-info text-dark ms-1">active</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-building fs-1 d-block mb-2 opacity-25"></i>
+      {% if operator.is_superadmin %}
+      No accounts exist yet. A regular user needs to create one via
+      <code>/accounts/new</code>.
+      {% else %}
+      You're not in any accounts yet.
+      <a href="/accounts/new">Create one</a> to get started.
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
