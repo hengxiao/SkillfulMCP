@@ -61,6 +61,55 @@ def _expected_from_metadata() -> dict[str, set[str]]:
 # ---------------------------------------------------------------------------
 
 class TestMigrationsSQLite:
+    def test_env_py_does_not_disable_existing_loggers(self):
+        """Regression: `migrations/env.py` previously called
+        `fileConfig(alembic.ini)` which by default set
+        `disable_existing_loggers=True`. Inside the catalog app's
+        lifespan, that silently turned off uvicorn's `uvicorn.error`
+        logger — the one uvicorn uses to report lifespan completion back
+        to its startup poller. Result: the worker successfully ran
+        migrations then exited with code 1 right after. Found by a live
+        smoke test in Phase A of the test-hardening pass; this test
+        ensures we don't accidentally re-break it."""
+        import logging
+        # Create some real loggers to observe state.
+        before = logging.getLogger("uvicorn.error")
+        before.addHandler(logging.NullHandler())
+        before_disabled = before.disabled
+
+        # Load the migration env module in the same way the catalog's
+        # lifespan does. We don't actually run migrations — we just
+        # exercise the fileConfig call at import time.
+        from alembic.config import Config
+        from alembic import script
+
+        cfg = Config(str(ALEMBIC_INI))
+        # Creating a ScriptDirectory forces alembic.ini to be parsed but
+        # does NOT run env.py. We need env.py to run, which happens on
+        # any alembic command. Simulate by invoking command.history
+        # which is cheap and loads env.py.
+        from alembic import command
+        import os
+        # Point at an existing (post-migration) DB that our tests create,
+        # or just a memory URL — fileConfig runs regardless.
+        old = os.environ.get("MCP_DATABASE_URL")
+        os.environ["MCP_DATABASE_URL"] = "sqlite:///:memory:"
+        try:
+            command.history(cfg)
+        finally:
+            if old is None:
+                os.environ.pop("MCP_DATABASE_URL", None)
+            else:
+                os.environ["MCP_DATABASE_URL"] = old
+
+        after = logging.getLogger("uvicorn.error")
+        # The key assertion: the logger is not in the "disabled" state.
+        assert after.disabled is False, (
+            "migrations/env.py disabled an existing logger — lifespan "
+            "will exit uvicorn with code 1 after migrations run. "
+            "Check the fileConfig call has disable_existing_loggers=False."
+        )
+
     def test_upgrade_head_builds_expected_schema(self, tmp_path):
         """After `alembic upgrade head`, every model table exists with
         the columns declared in `Base.metadata`."""

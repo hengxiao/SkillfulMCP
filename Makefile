@@ -34,6 +34,7 @@ help:
 	@echo "  make webui             Start the Web UI     (localhost:$(WEBUI_PORT))"
 	@echo "  make test              Run the test suite"
 	@echo "  make test-v            Run the test suite (verbose)"
+	@echo "  make test-cov          Run the suite with coverage (fails if <85%)"
 	@echo "  make example           Default example network (Anthropic SDK)"
 	@echo "  make example-anthropic Same as above (explicit)"
 	@echo "  make example-openai    OpenAI SDK runner"
@@ -82,6 +83,12 @@ test:
 
 test-v:
 	$(PYTEST) -v
+
+# Coverage run + report. `fail_under=85` in pyproject.toml enforces the
+# floor — regressions cause this target to exit non-zero, which is what
+# CI checks.
+test-cov:
+	$(PYTEST) --cov --cov-report=term-missing
 
 # ── Examples ───────────────────────────────────────────────────────────────────
 example: example-anthropic

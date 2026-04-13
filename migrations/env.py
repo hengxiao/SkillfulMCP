@@ -23,7 +23,14 @@ from mcp_server.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` is load-bearing. When the catalog
+    # app's lifespan imports this env.py and runs `alembic upgrade head`,
+    # the default `fileConfig` call would silently disable every logger
+    # that exists at that point — including uvicorn's `uvicorn.error`
+    # logger, which uvicorn uses to signal lifespan completion back to
+    # its startup poller. Without that, the poller times out and the
+    # worker exits with code 1 right after the migration succeeds.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _resolve_url() -> str:

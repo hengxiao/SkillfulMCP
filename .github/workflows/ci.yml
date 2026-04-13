@@ -33,8 +33,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,postgres,s3,examples]"
 
-      - name: Pytest
-        run: pytest -v
+      - name: Pytest + coverage (gate at 85%)
+        # Gate lives in pyproject.toml under [tool.coverage.report] fail_under
+        run: pytest -v --cov --cov-report=term-missing
 
   # ---------------------------------------------------------------------------
   # Postgres matrix: same suite, against real Postgres. Catches dialect drift
