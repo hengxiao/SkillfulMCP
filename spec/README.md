@@ -11,6 +11,10 @@ The aim of this project is to explore the possibility of building an MCP server 
 
 ## Contents
 
+Start here:
+
+- [`delivery.md`](delivery.md) — **rolling snapshot of what has actually shipped.** Answers "what can the system do today?" without reading a dozen wave-specific files. Cross-references every other spec.
+
 Core design:
 
 - `architecture.md` — system architecture, components, and request flow.
