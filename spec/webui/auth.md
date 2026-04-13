@@ -29,13 +29,14 @@ pipeline; swapping the credential source is a localized change later.
   flat `admin` / `viewer` roles, CRUD UI at `/users`, self-service
   password change at `/account`. See
   [visibility-and-accounts.md](../visibility-and-accounts.md#wave-8b-users--roles--shipped).
-- **Wave 9 — proposed.** Replaces the flat role set with an
-  **account-based** tenant model: platform-level `superadmin` +
-  per-account `account-admin` + `contributor` + `viewer`. Every
-  non-superadmin user belongs to exactly one account; the
-  account-admin is the only non-superadmin who manages users inside
-  it. Adds email-based allow lists for cross-account sharing. See
-  [user-management.md](../user-management.md).
+- **Wave 9 — proposed.** Replaces the flat role set with a
+  **multi-tenant account model**: users and accounts join via an
+  `account_memberships` table; each membership carries a role
+  (`account-admin` / `contributor` / `viewer`). The same user can
+  hold different roles in different accounts. A platform-level
+  `superadmin` (singleton) creates accounts and mints initial
+  admins. Adds email-based allow lists for cross-account sharing.
+  See [user-management.md](../user-management.md).
 
 ## Operator config
 

@@ -291,11 +291,12 @@ proxies with the configured admin key.
 
 Full spec: [`spec/webui.md`](spec/webui.md) +
 [`spec/webui/`](spec/webui/). Next-wave plan for owner-based skill
-management, email allow lists, and per-account tenant isolation:
-[`spec/user-management.md`](spec/user-management.md) (introduces an
-`accounts` table plus `superadmin` / `account-admin` / `contributor`
-/ `viewer` roles, extending the current flat `admin` / `viewer`
-model).
+management, email allow lists, and multi-tenant accounts:
+[`spec/user-management.md`](spec/user-management.md) (introduces
+`accounts` + `account_memberships` tables plus `superadmin`
+(platform) / `account-admin` / `contributor` / `viewer`
+(per-membership) roles, extending the current flat `admin` /
+`viewer` model).
 
 ---
 

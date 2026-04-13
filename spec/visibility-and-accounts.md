@@ -99,16 +99,17 @@ account-scoped roles** spec'd in [user-management.md](user-management.md)):
 - **`viewer`** — read-only across all UI pages. No mutating actions
   rendered.
 
-Wave 9 replaces this flat pool with an **account-based** tenant model:
-a platform-level `superadmin` (singleton) + per-account
-`account-admin` + `contributor` + `viewer`. Every user except the
-superadmin belongs to exactly one **account**, and the account-admin
-is the only non-superadmin who can create or delete users in it. The
-Wave 8b `admin` and `viewer` rows migrate into Wave 9 per
-[user-management.md §2.2](user-management.md#22-transition-from-wave-8b):
-the oldest `admin` becomes `superadmin`; the rest each become an
+Wave 9 replaces this flat pool with a **multi-tenant account model**:
+users and accounts are joined via an `account_memberships` table,
+and each membership carries a role (`account-admin` / `contributor`
+/ `viewer`). A single user can hold different roles in different
+accounts. A platform-level `superadmin` (singleton, outside any
+account) creates accounts and mints their initial admins. The Wave
+8b `admin` and `viewer` rows migrate per
+[user-management.md §2.4](user-management.md#24-transition-from-wave-8b):
+the oldest `admin` becomes `superadmin`; the rest each become sole
 `account-admin` of a fresh account named `"{email}'s team"`; every
-`viewer` lands in a `default` account as a `viewer`.
+`viewer` lands in a `default` account with a `viewer` membership.
 
 ### Schema (Wave 8b)
 
