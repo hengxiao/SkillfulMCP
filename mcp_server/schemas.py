@@ -227,53 +227,49 @@ class TokenResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# User schemas (Wave 8b)
+# User schemas (Wave 9 — `role` is no longer a column on `users`.
+# Account-scoped roles live on AccountMembership rows. The identity
+# schemas below carry no role field.)
 # ---------------------------------------------------------------------------
-
-VALID_ROLES: frozenset[str] = frozenset({"admin", "viewer"})
-
-
-def _validate_role(v: str) -> str:
-    if v not in VALID_ROLES:
-        raise ValueError(f"role must be one of {sorted(VALID_ROLES)}, got {v!r}")
-    return v
-
 
 class UserCreate(BaseModel):
     email: str
     password: str
-    role: str = "viewer"
     display_name: str | None = None
-
-    @field_validator("role")
-    @classmethod
-    def _r(cls, v: str) -> str:
-        return _validate_role(v)
 
 
 class UserUpdate(BaseModel):
     display_name: str | None = None
-    role: str | None = None
     disabled: bool | None = None
     password: str | None = None
-
-    @field_validator("role")
-    @classmethod
-    def _r(cls, v: str | None) -> str | None:
-        return _validate_role(v) if v is not None else v
 
 
 class UserResponse(BaseModel):
     id: str
     email: str
     display_name: str | None
-    role: str
     disabled: bool
     created_at: datetime
     updated_at: datetime
     last_login_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class AuthenticateResponse(BaseModel):
+    """Response shape for POST /admin/users/authenticate.
+
+    Extends the regular user response with `is_superadmin` so the Web UI
+    can tell platform-admin sessions apart from regular users. For the
+    hardcoded superadmin identity (§2.3), `id` is the reserved string
+    `"0"` and the DB is never touched.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+    disabled: bool = False
+    is_superadmin: bool = False
 
 
 class UserAuthenticateRequest(BaseModel):

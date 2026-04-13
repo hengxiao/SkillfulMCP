@@ -801,14 +801,15 @@ def create_app() -> FastAPI:
     async def create_user(
         email: Annotated[str, Form()],
         password: Annotated[str, Form()],
-        role: Annotated[str, Form()] = "viewer",
         display_name: Annotated[str, Form()] = "",
     ):
+        # Wave 9 drops the platform role from the admin-users flow;
+        # account-scoped roles live on memberships and will get their
+        # own UI in Wave 9.5.
         try:
             await get_client().create_user({
                 "email": email,
                 "password": password,
-                "role": role,
                 "display_name": display_name or None,
             })
             return _redirect("/users", f"User '{email}' created.")
@@ -833,13 +834,11 @@ def create_app() -> FastAPI:
               dependencies=CSRF + [Depends(require_role("admin"))])
     async def update_user(
         user_id: str,
-        role: Annotated[str, Form()],
         disabled: Annotated[str, Form()] = "",
         display_name: Annotated[str, Form()] = "",
         password: Annotated[str, Form()] = "",
     ):
         body: dict = {
-            "role": role,
             "disabled": disabled == "on",
             "display_name": display_name or None,
         }

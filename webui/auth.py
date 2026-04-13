@@ -32,11 +32,18 @@ SESSION_KEY_CSRF = "csrf_token"
 @dataclass(frozen=True)
 class Operator:
     email: str
-    # Wave 8b: role is carried on the session so templates and the
-    # `require_role` dep can make authorization decisions without a
-    # round-trip to the server on every request.
+    # Wave 8b kept `role` on the session for template gates. Wave 9
+    # drops `users.role` entirely — authority lives on account
+    # memberships (resolved per-request). Until Wave 9.5 reworks the
+    # Web UI around that model, `role` stays here so existing
+    # templates continue to render; it's always `"admin"` for any
+    # logged-in user because the old admin/viewer split is gone.
     role: str = "admin"
     user_id: str | None = None
+    # Wave 9: marks the env-hardcoded platform superadmin
+    # (superadmin@skillfulmcp.com). Templates that want to show
+    # platform-admin-only UI should gate on this, not on `role`.
+    is_superadmin: bool = False
 
 
 # Re-exported from mcp_server.pwhash so existing imports keep working.
@@ -72,7 +79,9 @@ def authenticate(email: str, password: str, settings: Settings | None = None) ->
     if not verify_password(password, pw_hash):
         return None
     # Env operators are implicitly admins — they predate roles.
-    return Operator(email=email, role="admin")
+    # Wave 9 drops the platform role, but the env fallback still
+    # logs people in as admins of the existing UI surface.
+    return Operator(email=email, role="admin", is_superadmin=False)
 
 
 async def authenticate_via_server(email: str, password: str) -> Operator | None:
@@ -92,8 +101,13 @@ async def authenticate_via_server(email: str, password: str) -> Operator | None:
         return None
     return Operator(
         email=data["email"],
-        role=data.get("role", "viewer"),
+        # Wave 9: the mcp_server authenticate response no longer
+        # carries a platform role; every logged-in user is effectively
+        # an admin for the existing UI surface. is_superadmin carries
+        # the platform-level marker.
+        role="admin",
         user_id=data.get("id"),
+        is_superadmin=bool(data.get("is_superadmin", False)),
     )
 
 
@@ -112,6 +126,7 @@ def get_session_operator(request: Request) -> Operator | None:
         email=email,
         role=raw.get("role", "admin"),
         user_id=raw.get("user_id"),
+        is_superadmin=bool(raw.get("is_superadmin", False)),
     )
 
 
@@ -120,6 +135,7 @@ def set_session_operator(request: Request, op: Operator) -> None:
         "email": op.email,
         "role": op.role,
         "user_id": op.user_id,
+        "is_superadmin": op.is_superadmin,
     }
     # A new login gets a fresh CSRF token so a leaked pre-login token
     # cannot be replayed after auth.

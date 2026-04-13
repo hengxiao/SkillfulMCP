@@ -3,6 +3,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -117,27 +118,34 @@ class SkillSkillset(Base):
 
 
 class User(Base):
-    """Web UI operator account.
+    """Web UI operator identity.
 
-    Wave 8b. Replaces the env-only `MCP_WEBUI_OPERATORS` JSON as the
-    source of truth. The env list is still consulted at startup as a
-    **bootstrap** when this table is empty, so existing deployments
-    transition without manual SQL.
+    Wave 9 shape. The identity row carries no role — authority lives
+    on :class:`AccountMembership` rows. The hardcoded superadmin
+    (see spec §2.3) is never stored here; id `"0"` is reserved via
+    the CHECK constraint below.
 
-    Roles in this wave: 'admin' (full privileges) or 'viewer' (read-only
-    UI). The `editor` role mentioned in productization §3.1 will land
-    when there's an operator org large enough to need the split.
+    `last_active_account_id` stamps the user's last-used account so
+    login can land them back in the same tenant context without a
+    picker (spec §3.4).
     """
 
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("id != '0'", name="ck_users_id_not_reserved"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # uuid4 hex
     email: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
-    role: Mapped[str] = mapped_column(String, nullable=False)
     disabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
+    )
+    last_active_account_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -149,6 +157,97 @@ class User(Base):
     )
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class Account(Base):
+    """A tenant container.
+
+    Wave 9. Every account has ≥ 1 `account-admin` membership at all
+    times (last-admin guard enforced at the service layer in
+    `mcp_server.accounts`). Accounts are flat — there is no
+    parent/child hierarchy, by design (spec §2.1).
+    """
+
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # uuid4 hex
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class AccountMembership(Base):
+    """Join row: user × account × role.
+
+    Wave 9. A user can appear in multiple accounts with different
+    roles. Composite PK `(user_id, account_id)` prevents the same
+    user from holding two roles in the same account (bump the role
+    instead).
+    """
+
+    __tablename__ = "account_memberships"
+
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    account_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    # 'account-admin' | 'contributor' | 'viewer'
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class PendingMembership(Base):
+    """Invitation for an email that hasn't signed up yet.
+
+    Wave 9. Consumed atomically during `POST /signup` when a new
+    user's normalized email matches. No verification tokens in the
+    initial cut — that's a deferred SMTP wave (spec §3.5.2).
+    """
+
+    __tablename__ = "pending_memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "email", "account_id", name="uq_pending_membership_email_account"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    invited_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
 

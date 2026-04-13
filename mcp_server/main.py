@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -18,6 +19,7 @@ from .middleware import (
     RequestSizeLimitMiddleware,
 )
 from .ratelimit import TokenBucket
+from .accounts import bootstrap_default_account
 from .routers import admin, agents, bundles, health, skillsets, skills, token, users as users_router
 from .users import bootstrap_from_env
 
@@ -41,15 +43,32 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         settings = get_settings()
         url = database_url or settings.database_url
+        # Wave 9: superadmin password hash must be configured. Fail
+        # loudly at startup rather than silently refusing logins later.
+        if not os.environ.get("MCP_SUPERADMIN_PASSWORD_HASH", "").strip():
+            raise RuntimeError(
+                "MCP_SUPERADMIN_PASSWORD_HASH must be set in Wave 9+. "
+                "Generate with: python -c "
+                "\"from mcp_server.pwhash import hash_password; "
+                "print(hash_password('your-password'))\""
+            )
+
         app.state.session_factory = init_db(url)
-        # Wave 8b: seed the users table from MCP_WEBUI_OPERATORS on first
-        # boot so env-configured deployments get operators migrated
-        # automatically. Subsequent boots are no-ops.
+        # Wave 8b: seed the users table from MCP_WEBUI_OPERATORS on
+        # first boot so env-configured deployments get operators
+        # migrated automatically. Subsequent boots are no-ops.
+        # Wave 9: after the users are in place, ensure a `default`
+        # account exists and every role-less user gets an
+        # `account-admin` membership there.
         with app.state.session_factory() as db:
-            created = bootstrap_from_env(db)
+            created_users = bootstrap_from_env(db)
+            bootstrap_default_account(db)
         log.info(
             "startup",
-            extra={"database_url": _redact_url(url), "bootstrapped_users": created},
+            extra={
+                "database_url": _redact_url(url),
+                "bootstrapped_users": created_users,
+            },
         )
         yield
         log.info("shutdown")

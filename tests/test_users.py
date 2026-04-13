@@ -1,16 +1,13 @@
-"""
-Wave 8b — user-management tests.
+"""User identity service tests (Wave 9 shape — role-less users).
 
-Three layers:
-- Service layer (`mcp_server/users.py`) — CRUD + bootstrap.
-- HTTP admin endpoints (`/admin/users/*`).
-- End-to-end /admin/users/authenticate against a freshly seeded user.
+Moved Wave 8b role-management tests + last-admin guard into
+`test_accounts.py`; this file only exercises the identity layer
+(create/read/update/delete + bootstrap + /admin/users HTTP surface).
 """
 
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -29,14 +26,14 @@ class TestServiceLayer:
             db_session,
             email="Alice@Example.COM",
             password_hash=hash_password("hunter22"),
-            role="admin",
             display_name="  Alice  ",
         )
         # Email is normalized to lowercase; display_name is stripped.
         assert u.email == "alice@example.com"
         assert u.display_name == "Alice"
-        assert u.role == "admin"
         assert u.disabled is False
+        # Wave 9: users row carries no role column.
+        assert not hasattr(u, "role")
 
         looked_up = user_svc.get_user_by_email(db_session, "ALICE@example.com")
         assert looked_up is not None and looked_up.id == u.id
@@ -44,35 +41,46 @@ class TestServiceLayer:
     def test_duplicate_email_raises(self, db_session):
         user_svc.create_user(
             db_session, email="a@x.com",
-            password_hash=hash_password("p"), role="viewer",
+            password_hash=hash_password("p"),
         )
         with pytest.raises(ValueError, match="already in use"):
             user_svc.create_user(
                 db_session, email="a@x.com",
-                password_hash=hash_password("p"), role="viewer",
+                password_hash=hash_password("p"),
             )
 
-    def test_invalid_role_rejected(self, db_session):
-        with pytest.raises(ValueError, match="role must be one of"):
+    def test_reserved_email_rejected(self, db_session):
+        """Wave 9: superadmin@skillfulmcp.com cannot be registered."""
+        with pytest.raises(ValueError, match="reserved"):
             user_svc.create_user(
-                db_session, email="b@x.com",
-                password_hash=hash_password("p"), role="superuser",
+                db_session,
+                email="superadmin@skillfulmcp.com",
+                password_hash=hash_password("p"),
+            )
+
+    def test_reserved_email_case_normalized(self, db_session):
+        """The reserved-email check runs on the normalized form."""
+        with pytest.raises(ValueError, match="reserved"):
+            user_svc.create_user(
+                db_session,
+                email="  SUPERADMIN@SkillfulMCP.com  ",
+                password_hash=hash_password("p"),
             )
 
     def test_update_partial(self, db_session):
         u = user_svc.create_user(
             db_session, email="c@x.com",
-            password_hash=hash_password("p"), role="viewer",
+            password_hash=hash_password("p"),
         )
-        u2 = user_svc.update_user(db_session, u.id, disabled=True, role="admin")
-        assert u2 and u2.disabled is True and u2.role == "admin"
+        u2 = user_svc.update_user(db_session, u.id, disabled=True)
+        assert u2 and u2.disabled is True
         # Display name left alone when not passed.
         assert u2.display_name == u.display_name
 
     def test_delete(self, db_session):
         u = user_svc.create_user(
             db_session, email="d@x.com",
-            password_hash=hash_password("p"), role="viewer",
+            password_hash=hash_password("p"),
         )
         assert user_svc.delete_user(db_session, u.id) is True
         assert user_svc.get_user(db_session, u.id) is None
@@ -83,7 +91,7 @@ class TestBootstrap:
     def test_noop_when_table_populated(self, db_session, monkeypatch):
         user_svc.create_user(
             db_session, email="pre@x.com",
-            password_hash=hash_password("p"), role="admin",
+            password_hash=hash_password("p"),
         )
         monkeypatch.setenv("MCP_WEBUI_OPERATORS", json.dumps(
             [{"email": "new@x.com", "password_hash": hash_password("p")}]
@@ -100,7 +108,9 @@ class TestBootstrap:
         created = user_svc.bootstrap_from_env(db_session)
         assert created == 1
         u = user_svc.get_user_by_email(db_session, "seed@x.com")
-        assert u is not None and u.role == "admin"
+        assert u is not None
+        # Wave 9: no role column to check.
+        assert u.email == "seed@x.com"
 
     def test_bad_json_is_not_fatal(self, db_session, monkeypatch):
         monkeypatch.setenv("MCP_WEBUI_OPERATORS", "not-json")
@@ -116,12 +126,12 @@ class TestAdminUsersHTTP:
         # Create.
         r = client.post("/admin/users",
                         json={"email": "ops@x.com", "password": "s3cret-pass",
-                              "role": "admin", "display_name": "Ops"},
+                              "display_name": "Ops"},
                         headers=ADMIN_HEADERS)
         assert r.status_code == 201, r.text
         user = r.json()
         assert user["email"] == "ops@x.com"
-        assert user["role"] == "admin"
+        assert "role" not in user           # Wave 9: no role field
         assert "password_hash" not in user  # never exposed
 
         # List contains them.
@@ -129,19 +139,21 @@ class TestAdminUsersHTTP:
         assert r.status_code == 200
         assert any(u["id"] == user["id"] for u in r.json())
 
-        # Update.
+        # Update display_name (no role field).
         r = client.put(f"/admin/users/{user['id']}",
-                       json={"role": "viewer", "disabled": False},
+                       json={"display_name": "New Name"},
                        headers=ADMIN_HEADERS)
         assert r.status_code == 200, r.text
-        assert r.json()["role"] == "viewer"
+        assert r.json()["display_name"] == "New Name"
 
-        # Authenticate (via admin-key dep — internal Web UI uses this).
+        # Authenticate.
         r = client.post("/admin/users/authenticate",
                         json={"email": "ops@x.com", "password": "s3cret-pass"},
                         headers=ADMIN_HEADERS)
         assert r.status_code == 200
-        assert r.json()["id"] == user["id"]
+        body = r.json()
+        assert body["id"] == user["id"]
+        assert body["is_superadmin"] is False
 
         # Bad password → 401.
         r = client.post("/admin/users/authenticate",
@@ -155,35 +167,16 @@ class TestAdminUsersHTTP:
 
     def test_duplicate_email_409(self, client):
         client.post("/admin/users",
-                    json={"email": "dup@x.com", "password": "s3cret-pass",
-                          "role": "viewer"},
+                    json={"email": "dup@x.com", "password": "s3cret-pass"},
                     headers=ADMIN_HEADERS)
         r = client.post("/admin/users",
-                        json={"email": "dup@x.com", "password": "s3cret-pass",
-                              "role": "viewer"},
+                        json={"email": "dup@x.com", "password": "s3cret-pass"},
                         headers=ADMIN_HEADERS)
         assert r.status_code == 409
-
-    def test_cannot_delete_last_admin(self, client):
-        # Create a second admin so we can delete all the bootstrap ones
-        # without the guard tripping yet.
-        r = client.post("/admin/users",
-                        json={"email": "only@x.com", "password": "s3cret-pass",
-                              "role": "admin"},
-                        headers=ADMIN_HEADERS)
-        uid = r.json()["id"]
-        for u in client.get("/admin/users", headers=ADMIN_HEADERS).json():
-            if u["role"] == "admin" and u["id"] != uid:
-                client.delete(f"/admin/users/{u['id']}", headers=ADMIN_HEADERS)
-        # Only one admin left; deleting must 409.
-        r = client.delete(f"/admin/users/{uid}", headers=ADMIN_HEADERS)
-        assert r.status_code == 409
-        assert "last remaining" in r.json()["detail"]
 
     def test_disabled_user_cannot_authenticate(self, client):
         r = client.post("/admin/users",
-                        json={"email": "off@x.com", "password": "s3cret-pass",
-                              "role": "viewer"},
+                        json={"email": "off@x.com", "password": "s3cret-pass"},
                         headers=ADMIN_HEADERS)
         uid = r.json()["id"]
         client.put(f"/admin/users/{uid}",
@@ -197,3 +190,53 @@ class TestAdminUsersHTTP:
     def test_requires_admin_key(self, client):
         r = client.get("/admin/users")  # no X-Admin-Key
         assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Superadmin env-hardcoded auth
+# ---------------------------------------------------------------------------
+
+class TestSuperadminAuth:
+    def test_env_password_matches(self, client):
+        from tests.conftest import SUPERADMIN_TEST_PASSWORD
+        r = client.post(
+            "/admin/users/authenticate",
+            json={"email": "superadmin@skillfulmcp.com",
+                  "password": SUPERADMIN_TEST_PASSWORD},
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["is_superadmin"] is True
+        assert body["id"] == "0"
+        assert body["email"] == "superadmin@skillfulmcp.com"
+
+    def test_normalization_blocks_variants(self, client):
+        from tests.conftest import SUPERADMIN_TEST_PASSWORD
+        r = client.post(
+            "/admin/users/authenticate",
+            json={"email": "  SUPERADMIN@SkillfulMCP.com  ",
+                  "password": SUPERADMIN_TEST_PASSWORD},
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 200
+        assert r.json()["is_superadmin"] is True
+
+    def test_wrong_password_rejected(self, client):
+        r = client.post(
+            "/admin/users/authenticate",
+            json={"email": "superadmin@skillfulmcp.com",
+                  "password": "nope"},
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 401
+
+    def test_superadmin_cannot_register_via_admin_users(self, client):
+        r = client.post(
+            "/admin/users",
+            json={"email": "superadmin@skillfulmcp.com",
+                  "password": "s3cret-pass"},
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 409
+        assert "reserved" in r.json()["detail"]

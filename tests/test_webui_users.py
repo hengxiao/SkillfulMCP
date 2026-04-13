@@ -121,7 +121,6 @@ class TestUsersPageAccess:
         r = client.post("/users", data={
             "email": "new@x.com",
             "password": "s3cret-pass",
-            "role": "viewer",
             "display_name": "",
             "csrf_token": "",
         }, follow_redirects=False)
@@ -129,14 +128,14 @@ class TestUsersPageAccess:
         mock.create_user.assert_awaited_once()
         payload = mock.create_user.await_args.args[0]
         assert payload["email"] == "new@x.com"
-        assert payload["role"] == "viewer"
         assert payload["password"] == "s3cret-pass"
+        # Wave 9: no role field forwarded.
+        assert "role" not in payload
 
     def test_admin_update_user(self, admin_client):
         client, mock = admin_client
         mock.update_user.return_value = {}
         r = client.post("/users/u1/update", data={
-            "role": "admin",
             "disabled": "on",
             "display_name": "Boss",
             "password": "",
@@ -144,16 +143,17 @@ class TestUsersPageAccess:
         }, follow_redirects=False)
         assert r.status_code == 303
         body = mock.update_user.await_args.args[1]
-        assert body == {"role": "admin", "disabled": True,
-                        "display_name": "Boss"}
+        assert body == {"disabled": True, "display_name": "Boss"}
         # Empty password field is not forwarded.
         assert "password" not in body
+        # Wave 9: no role field forwarded.
+        assert "role" not in body
 
     def test_admin_update_user_with_password(self, admin_client):
         client, mock = admin_client
         mock.update_user.return_value = {}
         client.post("/users/u1/update", data={
-            "role": "viewer", "disabled": "",
+            "disabled": "",
             "display_name": "", "password": "newpass12",
             "csrf_token": "",
         })

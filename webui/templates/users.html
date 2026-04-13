@@ -29,11 +29,7 @@
           <td><a href="/users/{{ u.id }}">{{ u.email }}</a></td>
           <td>{{ u.display_name or '—' }}</td>
           <td>
-            {% if u.role == 'admin' %}
-              <span class="badge bg-primary">admin</span>
-            {% else %}
-              <span class="badge bg-secondary">viewer</span>
-            {% endif %}
+            <span class="text-muted small">—</span>
           </td>
           <td>
             {% if u.disabled %}

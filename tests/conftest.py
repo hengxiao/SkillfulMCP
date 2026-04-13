@@ -27,6 +27,17 @@ os.environ.setdefault("MCP_RATE_LIMIT_PER_MINUTE", "0")
 os.environ.setdefault("MCP_WEBUI_SESSION_SECRET", "test-session-secret-please-change")
 os.environ.setdefault("MCP_WEBUI_CSRF_ENABLED", "0")
 
+# Wave 9: the superadmin password hash is required for the catalog
+# lifespan to start. Stamp a deterministic test hash for
+# "superadmin-test-pw"; individual tests override when they need to
+# exercise the actual login flow.
+if not os.environ.get("MCP_SUPERADMIN_PASSWORD_HASH", "").strip():
+    from mcp_server.pwhash import hash_password
+    SUPERADMIN_TEST_PASSWORD = "superadmin-test-pw"
+    os.environ["MCP_SUPERADMIN_PASSWORD_HASH"] = hash_password(SUPERADMIN_TEST_PASSWORD)
+else:
+    SUPERADMIN_TEST_PASSWORD = "superadmin-test-pw"
+
 # Build a bcrypt-hashed test operator on the fly so tests don't pin a
 # frozen hash. Safe to call at import time; bcrypt is a dev dep.
 if "MCP_WEBUI_OPERATORS" not in os.environ:

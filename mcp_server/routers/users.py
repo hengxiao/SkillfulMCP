@@ -1,14 +1,23 @@
-"""Admin-only CRUD endpoints for Web UI operator accounts (Wave 8b).
+"""Admin-gated user identity endpoints.
 
-All routes require `X-Admin-Key`. The Web UI hits these to list/create/
-update/delete users and to verify credentials at login time.
+Wave 9 keeps this router alive for two reasons:
 
-Authentication is intentionally centralized here (rather than shipping
-password hashes over the wire) so the bcrypt library only has to live in
-one place.
+1. `POST /admin/users/authenticate` is still the Web UI's login path
+   — now with an env-hardcoded superadmin bypass (spec §2.3).
+2. `GET /admin/users` + CRUD stays available for the Wave 8b
+   admin-managed user pages until Wave 9.5 replaces them with the
+   account-scoped subtree flow.
+
+Role management moved out of this router entirely — there is no
+`role` on a Wave 9 `users` row. Account-scoped roles live on
+`account_memberships` and are managed under `mcp_server.accounts`
+(Wave 9.1 adds HTTP endpoints for them).
 """
 
 from __future__ import annotations
+
+import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,11 +28,13 @@ from ..logging_config import get_logger
 from ..models import User
 from ..pwhash import hash_password, verify_password
 from ..schemas import (
+    AuthenticateResponse,
     UserAuthenticateRequest,
     UserCreate,
     UserResponse,
     UserUpdate,
 )
+from ..users import SUPERADMIN_EMAIL, SUPERADMIN_USER_ID, normalize_email
 
 _log = get_logger("mcp.users.router")
 
@@ -48,14 +59,11 @@ def create_user(
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
 ):
-    # Hashing is done here (server-side) so the HTTP boundary never
-    # carries bcrypt hashes — plaintext in, hashes-at-rest only.
     try:
         u = user_svc.create_user(
             db,
             email=body.email,
             password_hash=hash_password(body.password),
-            role=body.role,
             display_name=body.display_name,
         )
     except ValueError as exc:
@@ -88,7 +96,6 @@ def update_user(
             db,
             user_id,
             display_name=body.display_name,
-            role=body.role,
             disabled=body.disabled,
             password_hash=pw_hash,
         )
@@ -105,23 +112,11 @@ def delete_user(
     db: Session = Depends(get_db),
     _: None = Depends(require_admin),
 ):
-    # Refuse to delete the last admin — locks would strand the UI.
-    u = user_svc.get_user(db, user_id)
-    if u and u.role == "admin":
-        remaining = [
-            x for x in user_svc.list_users(db)
-            if x.role == "admin" and not x.disabled and x.id != user_id
-        ]
-        if not remaining:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Cannot delete the last remaining active admin",
-            )
     if not user_svc.delete_user(db, user_id):
         raise HTTPException(status_code=404, detail="User not found")
 
 
-@router.post("/authenticate", response_model=UserResponse)
+@router.post("/authenticate", response_model=AuthenticateResponse)
 def authenticate_user(
     body: UserAuthenticateRequest,
     db: Session = Depends(get_db),
@@ -129,14 +124,52 @@ def authenticate_user(
 ):
     """Verify (email, password). 401 on invalid or disabled.
 
-    Centralizing bcrypt here keeps the hash out of the wire between
-    mcp_server and the Web UI.
+    Wave 9: the hardcoded superadmin identity (§2.3) is checked first,
+    bypassing the DB. When `MCP_SUPERADMIN_PASSWORD_HASH` is set and
+    the normalized email matches the reserved pseudo-email, a
+    superadmin-flagged response is returned with `id="0"`.
     """
-    u = user_svc.get_user_by_email(db, body.email)
+    normalized = normalize_email(body.email)
+
+    # Superadmin shortcut.
+    if normalized == SUPERADMIN_EMAIL:
+        env_hash = os.environ.get("MCP_SUPERADMIN_PASSWORD_HASH", "")
+        if not env_hash:
+            # Refuse to log in without a configured hash — ops error,
+            # not a guessable state worth distinguishing from 401.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+        if not verify_password(body.password, env_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password",
+            )
+        _log.info(
+            "superadmin login",
+            extra={"actor_email": SUPERADMIN_EMAIL},
+        )
+        return AuthenticateResponse(
+            id=SUPERADMIN_USER_ID,
+            email=SUPERADMIN_EMAIL,
+            display_name="Superadmin",
+            disabled=False,
+            is_superadmin=True,
+        )
+
+    # Regular DB-backed user.
+    u = user_svc.get_user_by_email(db, normalized)
     if u is None or u.disabled or not verify_password(body.password, u.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
     user_svc.touch_login(db, u.id)
-    return _to_response(u)
+    return AuthenticateResponse(
+        id=u.id,
+        email=u.email,
+        display_name=u.display_name,
+        disabled=u.disabled,
+        is_superadmin=False,
+    )
