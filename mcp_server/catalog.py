@@ -169,15 +169,28 @@ def delete_skill_version(db: Session, skill_id: str, version: str) -> bool:
     return True
 
 
-def list_skills_for_agent(db: Session, allowed_ids: set[str]) -> list[Skill]:
-    """Return the latest version of each skill the agent is allowed to access."""
+def list_skills_for_agent(
+    db: Session,
+    allowed_ids: set[str],
+    *,
+    limit: int | None = None,
+) -> list[Skill]:
+    """Return the latest version of each skill the agent is allowed to access.
+
+    If `limit` is given, cap the result at that many rows. No cursor /
+    keyset pagination yet — that's a follow-up wave. Rows are ordered by
+    `id` so a capped response is deterministic.
+    """
     if not allowed_ids:
         return []
-    return (
+    q = (
         db.query(Skill)
         .filter(Skill.id.in_(allowed_ids), Skill.is_latest.is_(True))
-        .all()
+        .order_by(Skill.id)
     )
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 # ---------------------------------------------------------------------------

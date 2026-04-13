@@ -14,6 +14,8 @@ failure mode on a missing `MCP_JWT_SECRET` is obvious).
 | `jwt_algorithm`   | `MCP_JWT_ALGORITHM`  | `"HS256"`                          |          |
 | `admin_key`       | `MCP_ADMIN_KEY`      | `""`                               | Used by `require_admin`; empty value disables the admin-key check, which is fine for local dev only |
 | `database_url`    | `MCP_DATABASE_URL`   | `"sqlite:///./skillful_mcp.db"`    |          |
+| `rate_limit_per_minute` | `MCP_RATE_LIMIT_PER_MINUTE` | `600`                    | Per-IP requests-per-minute. `0` disables the limiter. Tests set it to `0`. |
+| `max_request_body_mb`   | `MCP_MAX_REQUEST_BODY_MB`   | `101`                    | App-level body size cap. Sits above the bundle endpoint's own 100 MB check. |
 
 ## `get_settings() -> Settings`
 

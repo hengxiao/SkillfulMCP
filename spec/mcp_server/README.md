@@ -20,7 +20,8 @@ These are implementation-level docs; the high-level design lives in
 | `registry.py`                 | [registry.md](registry.md)                              | Agent CRUD                                                   |
 | `bundles.py`                  | [bundles.md](bundles.md)                                | Archive extraction + bundle storage                          |
 | `logging_config.py`           | [logging_config.md](logging_config.md)                  | JSON formatter + request-id context                          |
-| `middleware.py`               | [middleware.md](middleware.md)                          | Request-ID middleware (access log + context propagation)     |
+| `middleware.py`               | [middleware.md](middleware.md)                          | Request-ID, request-size, rate-limit middleware              |
+| `ratelimit.py`                | [ratelimit.md](ratelimit.md)                            | Token-bucket rate limiter (backing store for the middleware) |
 | `errors.py`                   | [errors.md](errors.md)                                  | Global exception handlers + typed error envelope             |
 | `routers/`                    | [routers/README.md](routers/README.md)                  | HTTP route modules (one per resource)                        |
 

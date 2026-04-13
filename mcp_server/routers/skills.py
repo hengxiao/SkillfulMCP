@@ -36,10 +36,22 @@ def _to_response(skill: Skill) -> SkillResponse:
 def list_skills(
     claims: dict = Depends(get_current_claims),
     db: Session = Depends(get_db),
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=10_000,
+        description="Optional cap on rows returned (no cursor; see productization.md for plan).",
+    ),
 ):
-    """List all skills the requesting agent is authorized to access (latest version of each)."""
+    """List skills the requesting agent is authorized to access (latest version of each).
+
+    Response shape is a flat list for backwards compatibility. Cursor-based
+    pagination with a response envelope is tracked in the productization
+    plan and will ship on a `/v1/` prefix once the catalog scale warrants
+    it.
+    """
     allowed_ids = resolve_allowed_skill_ids(claims, db)
-    return [_to_response(s) for s in list_skills_for_agent(db, allowed_ids)]
+    return [_to_response(s) for s in list_skills_for_agent(db, allowed_ids, limit=limit)]
 
 
 @router.get("/{skill_id}/versions", response_model=list[SkillVersionInfo])

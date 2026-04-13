@@ -12,7 +12,12 @@ from .errors import (
     validation_exception_handler,
 )
 from .logging_config import configure_logging, get_logger
-from .middleware import RequestIDMiddleware
+from .middleware import (
+    RateLimitMiddleware,
+    RequestIDMiddleware,
+    RequestSizeLimitMiddleware,
+)
+from .ratelimit import TokenBucket
 from .routers import admin, agents, bundles, health, skillsets, skills, token
 
 
@@ -47,7 +52,22 @@ def create_app(database_url: str | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware (innermost last; Starlette applies them in reverse order).
+    # Middleware stack. `add_middleware` PREPENDS to Starlette's stack,
+    # so the LAST-added middleware is outermost (runs first on ingress).
+    # We want:
+    #   RequestID (outermost) → SizeLimit → RateLimit → handler
+    # so the request id is already in the ContextVar when rate-limit /
+    # size errors fire, and oversize bodies are rejected before they eat
+    # a rate-limit token. Hence the reverse registration order below.
+    settings = get_settings()
+    app.state.rate_limiter = TokenBucket(settings.rate_limit_per_minute)
+    app.add_middleware(
+        RateLimitMiddleware, limiter=app.state.rate_limiter
+    )
+    app.add_middleware(
+        RequestSizeLimitMiddleware,
+        max_bytes=settings.max_request_body_mb * 1024 * 1024,
+    )
     app.add_middleware(RequestIDMiddleware)
 
     # Global exception handlers so every error carries a consistent envelope

@@ -207,15 +207,26 @@ order.
 
 ### 3.3 API surface
 
-- **[P0] Path-versioned API.** Prefix every route with `/v1/`. Return
-  `X-API-Version` header. Unversioned paths continue to exist but emit
-  `Deprecation:` header and a `Sunset` date.
-- **[P0] Pagination on list endpoints.**
-  `GET /v1/skills?cursor=…&limit=…`. Use a keyset cursor (created_at + pk)
-  not offset. Return `next_cursor` in the body.
-- **[P0] Request size and rate limits.** Per-tenant token bucket in Redis;
-  return `429` with `Retry-After`. Global request-body size limit enforced
-  at the load balancer.
+- **[P0 — DEFERRED] Path-versioned API.** Adding `/v1/` with identical
+  behavior on both paths is busywork without payoff. Deferred until the
+  first breaking change to the API shape (e.g. cursor-paginated list
+  envelopes); the new shape lands under `/v1/` and unversioned routes
+  gain `Deprecation:` / `Sunset` headers at that point.
+- **[P0 — partially SHIPPED] Pagination on list endpoints.** Wave 3
+  added `?limit=` on `GET /skills` (capped at 10000, ordered by id for
+  determinism) as a stopgap. Cursor-based pagination with a response
+  envelope is tracked as follow-up — keyset on `(created_at, pk)`,
+  returned as `{items, next_cursor}` under a future `/v1/` surface so
+  the response shape change doesn't break legacy callers.
+- **[P0 — SHIPPED (in-process)] Request size and rate limits.**
+  `mcp_server/ratelimit.TokenBucket` + `RateLimitMiddleware` enforce
+  per-IP limits (default 600 req/min, env-tunable, `0` disables).
+  `RequestSizeLimitMiddleware` rejects oversize bodies with 413 before
+  the handler runs. Both emit the standard error envelope with
+  `Retry-After` / `request_id`. Remaining: Redis-backed bucket for
+  multi-replica accuracy, per-endpoint limits (`POST /token` should be
+  stricter than `GET /skills`), proxy-aware client key resolution
+  (`MCP_TRUST_PROXY_HEADERS` knob) once the ingress story is settled.
 - **[P0 — partially SHIPPED] Typed errors.** `mcp_server/errors.py` wraps
   every response in `{detail, code, request_id}`. Backwards-compatible —
   the legacy `detail` field is preserved. 500s are scrubbed to a generic

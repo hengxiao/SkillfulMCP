@@ -11,6 +11,10 @@ import os
 os.environ.setdefault("MCP_JWT_SECRET", "test-secret-key-for-testing-only")
 os.environ.setdefault("MCP_ADMIN_KEY", "test-admin-key")
 os.environ.setdefault("MCP_DATABASE_URL", "sqlite:///:memory:")
+# Disable the rate limiter for the default test client so unrelated
+# integration tests never flake. Rate-limit tests in test_rate_limit.py
+# construct their own apps with an explicit limit.
+os.environ.setdefault("MCP_RATE_LIMIT_PER_MINUTE", "0")
 
 import pytest
 from fastapi.testclient import TestClient

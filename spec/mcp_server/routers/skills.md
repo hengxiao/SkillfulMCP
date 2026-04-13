@@ -2,12 +2,16 @@
 
 Skill CRUD. Reads are JWT-scoped; writes are admin-gated.
 
-## `GET /skills` (JWT)
+## `GET /skills?limit=` (JWT)
 
 Returns the latest version of every skill the caller's JWT authorizes
 (`authorization.resolve_allowed_skill_ids` + `catalog.list_skills_for_agent`).
 
-No pagination (prototype limitation — productization §3.3).
+Accepts an optional `limit` query parameter (integer, `1 <= limit <= 10000`)
+that caps the number of rows returned. Rows are ordered by `id` so a
+capped response is deterministic. No cursor yet — keyset pagination +
+response envelope is planned for a future `/v1/` prefix
+(productization §3.3).
 
 ## `GET /skills/{skill_id}/versions` (JWT)
 
