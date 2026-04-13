@@ -152,11 +152,20 @@
     <a class="nav-link {% if active == 'skills' %}active{% endif %}" href="/skills">
       <i class="bi bi-lightning"></i><span>Skills</span>
     </a>
+    {% if operator and operator.role == 'admin' %}
+    <a class="nav-link {% if active == 'users' %}active{% endif %}" href="/users">
+      <i class="bi bi-people"></i><span>Users</span>
+    </a>
+    {% endif %}
+    <a class="nav-link {% if active == 'account' %}active{% endif %}" href="/account">
+      <i class="bi bi-person-gear"></i><span>Account</span>
+    </a>
   </nav>
   <div class="sidebar-footer">
     {% if operator %}
       <div class="mb-2 text-truncate" title="{{ operator.email }}">
         <i class="bi bi-person-circle me-1"></i>{{ operator.email }}
+        <span class="badge bg-secondary ms-1">{{ operator.role }}</span>
       </div>
       <form method="post" action="/logout" class="m-0">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

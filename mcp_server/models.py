@@ -116,6 +116,42 @@ class SkillSkillset(Base):
     )
 
 
+class User(Base):
+    """Web UI operator account.
+
+    Wave 8b. Replaces the env-only `MCP_WEBUI_OPERATORS` JSON as the
+    source of truth. The env list is still consulted at startup as a
+    **bootstrap** when this table is empty, so existing deployments
+    transition without manual SQL.
+
+    Roles in this wave: 'admin' (full privileges) or 'viewer' (read-only
+    UI). The `editor` role mentioned in productization §3.1 will land
+    when there's an operator org large enough to need the split.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # uuid4 hex
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

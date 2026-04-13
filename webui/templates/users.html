@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Users — SkillfulMCP{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="mb-0 fw-bold"><i class="bi bi-people me-2 text-primary"></i>Users</h2>
+  <a href="/users/new" class="btn btn-primary">
+    <i class="bi bi-plus-lg me-1"></i>New user
+  </a>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if users %}
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Email</th>
+          <th>Display name</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Last login</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td><a href="/users/{{ u.id }}">{{ u.email }}</a></td>
+          <td>{{ u.display_name or '—' }}</td>
+          <td>
+            {% if u.role == 'admin' %}
+              <span class="badge bg-primary">admin</span>
+            {% else %}
+              <span class="badge bg-secondary">viewer</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.disabled %}
+              <span class="badge bg-danger">disabled</span>
+            {% else %}
+              <span class="badge bg-success">active</span>
+            {% endif %}
+          </td>
+          <td class="text-muted small">
+            {{ u.last_login_at[:19].replace('T', ' ') if u.last_login_at else '—' }}
+          </td>
+          <td class="text-end">
+            <a href="/users/{{ u.id }}" class="btn btn-sm btn-outline-secondary">
+              <i class="bi bi-pencil"></i>
+            </a>
+            <button
+              hx-delete="/users/{{ u.id }}"
+              hx-target="closest tr"
+              hx-swap="delete"
+              hx-confirm="Delete user {{ u.email }}?"
+              class="btn btn-sm btn-outline-danger">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="text-center text-muted py-5">
+      <i class="bi bi-people fs-1 d-block mb-2 opacity-25"></i>
+      No users yet.
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

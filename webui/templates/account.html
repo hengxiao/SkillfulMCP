@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Account — SkillfulMCP{% endblock %}
+
+{% block content %}
+<h2 class="mb-4 fw-bold"><i class="bi bi-person-gear me-2 text-primary"></i>Your account</h2>
+
+<div class="row g-4" style="max-width: 900px;">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom pt-3">
+        <i class="bi bi-person me-1"></i> Profile
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4 text-muted">Email</dt>
+          <dd class="col-sm-8">{{ operator.email }}</dd>
+
+          <dt class="col-sm-4 text-muted">Role</dt>
+          <dd class="col-sm-8"><span class="badge bg-secondary">{{ operator.role }}</span></dd>
+
+          <dt class="col-sm-4 text-muted">Source</dt>
+          <dd class="col-sm-8">
+            {% if operator.user_id %}
+              <span class="text-success"><i class="bi bi-database-check me-1"></i>DB</span>
+            {% else %}
+              <span class="text-warning"><i class="bi bi-file-earmark-code me-1"></i>env bootstrap</span>
+            {% endif %}
+          </dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white fw-semibold border-bottom pt-3">
+        <i class="bi bi-key me-1"></i> Change password
+      </div>
+      <div class="card-body">
+        {% if operator.user_id %}
+        <form method="post" action="/account/password">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">New password</label>
+            <input type="password" name="new_password" class="form-control" minlength="8" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Confirm</label>
+            <input type="password" name="confirm_password" class="form-control" minlength="8" required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-save me-1"></i>Update password
+          </button>
+        </form>
+        {% else %}
+        <p class="text-muted mb-0 small">
+          You are signed in via <code>MCP_WEBUI_OPERATORS</code> env. Password changes
+          require a DB-backed account. Ask an admin to create one for you, then sign in with it.
+        </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

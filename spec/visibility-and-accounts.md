@@ -236,17 +236,35 @@ catches drift against `Base.metadata`.
 
 ## Sequencing
 
-### Wave 8a (visibility)
+### Wave 8a (visibility) — **shipped**
 
-Lowest dependency. Ship first. Existing tokens, the existing Web UI,
+Lowest dependency. Shipped first. Existing tokens, the existing Web UI,
 and the existing test suite all still work without operator action —
 the new field defaults to `'private'`.
 
-### Wave 8b (users + roles)
+### Wave 8b (users + roles) — **shipped**
 
-Bigger. Schema change + bootstrap + Web UI pages + role-gated
-middleware. Login flow changes from env-only to DB-with-env-bootstrap.
-Coordination needed with Web UI tests (operator fixture).
+Landed in commit after 8a. Ships:
+
+- `users` table + `0003_users` migration.
+- `mcp_server/users.py` CRUD + `bootstrap_from_env` seeder (run in the
+  app lifespan so existing `MCP_WEBUI_OPERATORS` deployments migrate
+  on first boot).
+- `/admin/users/*` admin-gated CRUD + `/admin/users/authenticate` so
+  the Web UI never ships password hashes over the wire.
+- `mcp_server.pwhash` — shared bcrypt helper used by the server-side
+  auth endpoint and the Web UI (resolves the webui→mcp_server
+  dependency direction).
+- Web UI login now prefers DB auth, falls back to env operators only
+  when the server is unreachable or the env lookup is the only match.
+- Session now carries `{email, role, user_id}`; role drives
+  `require_role("admin")` dep used on `/users/*` routes.
+- Templates: `users.html`, `user_new.html`, `user_detail.html`,
+  `account.html` (self-service password change for DB-backed accounts).
+- Sidebar hides the Users link from viewers.
+- Last-admin deletion guard: refuses to 204 when it would strand the UI.
+- Tests: `tests/test_users.py` (service + HTTP layers) and
+  `tests/test_webui_users.py` (page rendering + role gating).
 
 ### Wave 8c (token issuance UI)
 

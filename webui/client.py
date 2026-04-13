@@ -160,3 +160,40 @@ class MCPClient:
 
     async def list_agents(self) -> list[dict]:
         return await self._request("GET", "/agents")
+
+    # ------------------------------------------------------------------
+    # Users (admin endpoints — Wave 8b)
+    # ------------------------------------------------------------------
+
+    async def list_users(self) -> list[dict]:
+        return await self._request("GET", "/admin/users")
+
+    async def get_user(self, user_id: str) -> dict:
+        return await self._request("GET", f"/admin/users/{user_id}")
+
+    async def create_user(self, data: dict) -> dict:
+        return await self._request("POST", "/admin/users", json=data)
+
+    async def update_user(self, user_id: str, data: dict) -> dict:
+        return await self._request("PUT", f"/admin/users/{user_id}", json=data)
+
+    async def delete_user(self, user_id: str) -> None:
+        await self._request("DELETE", f"/admin/users/{user_id}")
+
+    async def authenticate_user(self, email: str, password: str) -> dict | None:
+        """Returns the user dict on success, None on 401.
+
+        Anything other than 200/401 (transport errors, 500s) bubbles up
+        as MCPError so the caller can decide whether to fall back to env
+        operators.
+        """
+        try:
+            return await self._request(
+                "POST",
+                "/admin/users/authenticate",
+                json={"email": email, "password": password},
+            )
+        except MCPError as exc:
+            if exc.status_code == 401:
+                return None
+            raise

@@ -18,7 +18,8 @@ from .middleware import (
     RequestSizeLimitMiddleware,
 )
 from .ratelimit import TokenBucket
-from .routers import admin, agents, bundles, health, skillsets, skills, token
+from .routers import admin, agents, bundles, health, skillsets, skills, token, users as users_router
+from .users import bootstrap_from_env
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -41,7 +42,15 @@ def create_app(database_url: str | None = None) -> FastAPI:
         settings = get_settings()
         url = database_url or settings.database_url
         app.state.session_factory = init_db(url)
-        log.info("startup", extra={"database_url": _redact_url(url)})
+        # Wave 8b: seed the users table from MCP_WEBUI_OPERATORS on first
+        # boot so env-configured deployments get operators migrated
+        # automatically. Subsequent boots are no-ops.
+        with app.state.session_factory() as db:
+            created = bootstrap_from_env(db)
+        log.info(
+            "startup",
+            extra={"database_url": _redact_url(url), "bootstrapped_users": created},
+        )
         yield
         log.info("shutdown")
 
@@ -83,6 +92,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(agents.router)
     app.include_router(skillsets.router)
     app.include_router(admin.router)
+    app.include_router(users_router.router)
 
     return app
 

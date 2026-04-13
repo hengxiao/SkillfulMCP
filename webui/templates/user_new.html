@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}New user — SkillfulMCP{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/users">Users</a></li>
+    <li class="breadcrumb-item active">New</li>
+  </ol>
+</nav>
+
+<h2 class="mb-4 fw-bold"><i class="bi bi-person-plus me-2 text-primary"></i>New user</h2>
+
+<form method="post" action="/users" class="card border-0 shadow-sm" style="max-width: 640px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="card-body">
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+      <input type="email" name="email" class="form-control" required autofocus>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Display name</label>
+      <input type="text" name="display_name" class="form-control">
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Role</label>
+      <select name="role" class="form-select">
+        <option value="viewer" selected>viewer (read-only UI)</option>
+        <option value="admin">admin (full privileges)</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Password <span class="text-danger">*</span></label>
+      <input type="password" name="password" class="form-control" minlength="8" required>
+      <div class="form-text">At least 8 characters.</div>
+    </div>
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-end gap-2 py-3">
+    <a href="/users" class="btn btn-secondary">Cancel</a>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Create</button>
+  </div>
+</form>
+{% endblock %}

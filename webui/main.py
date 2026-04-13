@@ -23,14 +23,16 @@ from starlette.middleware.sessions import SessionMiddleware
 from .auth import (
     Operator,
     authenticate,
+    authenticate_via_server,
     clear_session,
     get_csrf_token,
     get_session_operator,
+    hash_password,
     set_session_operator,
 )
 from .client import MCPClient, MCPError
 from .config import get_settings
-from .middleware import AuthMiddleware, csrf_required
+from .middleware import AuthMiddleware, csrf_required, require_role
 
 
 # Shorthand so every mutating route can declare `dependencies=CSRF` and
@@ -139,7 +141,13 @@ def create_app() -> FastAPI:
                 "next": next,
             })
 
-        op = authenticate(email, password)
+        # Wave 8b: try DB-backed authentication first (via the mcp_server
+        # /admin/users/authenticate endpoint). Fall back to the env-only
+        # list for disaster-recovery when the server is unreachable or
+        # the table is empty.
+        op = await authenticate_via_server(email, password)
+        if op is None:
+            op = authenticate(email, password)
         if op is None:
             return _render(request, "login.html", {
                 "error": "Invalid email or password.",
@@ -672,6 +680,123 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ #
     # Bundle file fetch (for the viewer modal)                            #
     # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # User management (admin only) + self-service /account                #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/users", response_class=HTMLResponse,
+             dependencies=[Depends(require_role("admin"))])
+    async def users_page(request: Request, msg: str = "", msg_type: str = "success"):
+        try:
+            users = await get_client().list_users()
+            error = None
+        except MCPError as exc:
+            users, error = [], str(exc)
+        return _render(request, "users.html", {
+            "active": "users",
+            "users": users,
+            "error": error,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.get("/users/new", response_class=HTMLResponse,
+             dependencies=[Depends(require_role("admin"))])
+    async def users_new_page(request: Request):
+        return _render(request, "user_new.html", {"active": "users"})
+
+    @app.post("/users", dependencies=CSRF + [Depends(require_role("admin"))])
+    async def create_user(
+        email: Annotated[str, Form()],
+        password: Annotated[str, Form()],
+        role: Annotated[str, Form()] = "viewer",
+        display_name: Annotated[str, Form()] = "",
+    ):
+        try:
+            await get_client().create_user({
+                "email": email,
+                "password": password,
+                "role": role,
+                "display_name": display_name or None,
+            })
+            return _redirect("/users", f"User '{email}' created.")
+        except MCPError as exc:
+            return _redirect("/users", str(exc), "error")
+
+    @app.get("/users/{user_id}", response_class=HTMLResponse,
+             dependencies=[Depends(require_role("admin"))])
+    async def user_detail(request: Request, user_id: str,
+                          msg: str = "", msg_type: str = "success"):
+        try:
+            user = await get_client().get_user(user_id)
+        except MCPError as exc:
+            return _redirect("/users", str(exc), "error")
+        return _render(request, "user_detail.html", {
+            "active": "users",
+            "user": user,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.post("/users/{user_id}/update",
+              dependencies=CSRF + [Depends(require_role("admin"))])
+    async def update_user(
+        user_id: str,
+        role: Annotated[str, Form()],
+        disabled: Annotated[str, Form()] = "",
+        display_name: Annotated[str, Form()] = "",
+        password: Annotated[str, Form()] = "",
+    ):
+        body: dict = {
+            "role": role,
+            "disabled": disabled == "on",
+            "display_name": display_name or None,
+        }
+        if password:
+            body["password"] = password
+        try:
+            await get_client().update_user(user_id, body)
+            return _redirect(f"/users/{user_id}", "User updated.")
+        except MCPError as exc:
+            return _redirect(f"/users/{user_id}", str(exc), "error")
+
+    @app.delete("/users/{user_id}",
+                dependencies=CSRF + [Depends(require_role("admin"))])
+    async def delete_user_route(user_id: str):
+        try:
+            await get_client().delete_user(user_id)
+            return Response(status_code=200)
+        except MCPError as exc:
+            return Response(content=exc.detail, status_code=exc.status_code or 500)
+
+    @app.get("/account", response_class=HTMLResponse)
+    async def account_page(request: Request, msg: str = "", msg_type: str = "success"):
+        op = get_session_operator(request)
+        return _render(request, "account.html", {
+            "active": "account",
+            "operator": op,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.post("/account/password", dependencies=CSRF)
+    async def account_change_password(
+        request: Request,
+        new_password: Annotated[str, Form()],
+        confirm_password: Annotated[str, Form()],
+    ):
+        op = get_session_operator(request)
+        if op is None or not op.user_id:
+            return _redirect("/account",
+                             "Password change is only available for DB-backed accounts.",
+                             "error")
+        if new_password != confirm_password:
+            return _redirect("/account", "Passwords do not match.", "error")
+        if len(new_password) < 8:
+            return _redirect("/account", "Password must be at least 8 characters.", "error")
+        try:
+            await get_client().update_user(op.user_id, {"password": new_password})
+            return _redirect("/account", "Password updated.")
+        except MCPError as exc:
+            return _redirect("/account", str(exc), "error")
 
     @app.get("/skills/{skill_id}/versions/{version}/files/{path:path}")
     async def download_bundle_file(skill_id: str, version: str, path: str):

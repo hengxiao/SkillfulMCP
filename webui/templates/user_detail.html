@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ user.email }} — Users — SkillfulMCP{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/users">Users</a></li>
+    <li class="breadcrumb-item active">{{ user.email }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="mb-0 fw-bold"><i class="bi bi-person me-2 text-primary"></i>{{ user.email }}</h2>
+  <code class="text-muted">{{ user.id }}</code>
+</div>
+
+<form method="post" action="/users/{{ user.id }}/update"
+      class="card border-0 shadow-sm" style="max-width: 640px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="card-body">
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Email</label>
+      <input type="text" class="form-control bg-light" value="{{ user.email }}" disabled>
+      <div class="form-text">Email is immutable. Delete + recreate to change it.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Display name</label>
+      <input type="text" name="display_name" class="form-control"
+             value="{{ user.display_name or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Role</label>
+      <select name="role" class="form-select">
+        <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>viewer</option>
+        <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>admin</option>
+      </select>
+    </div>
+    <div class="mb-3 form-check">
+      <input type="checkbox" name="disabled" id="disabled" class="form-check-input"
+             {% if user.disabled %}checked{% endif %}>
+      <label class="form-check-label" for="disabled">Disabled (no login)</label>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">New password</label>
+      <input type="password" name="password" class="form-control" minlength="8"
+             placeholder="Leave blank to keep current">
+    </div>
+
+    <hr>
+    <div class="row small text-muted g-2">
+      <div class="col-4">
+        <div class="fw-semibold text-dark">Created</div>
+        {{ user.created_at[:19].replace('T',' ') if user.created_at else '—' }}
+      </div>
+      <div class="col-4">
+        <div class="fw-semibold text-dark">Updated</div>
+        {{ user.updated_at[:19].replace('T',' ') if user.updated_at else '—' }}
+      </div>
+      <div class="col-4">
+        <div class="fw-semibold text-dark">Last login</div>
+        {{ user.last_login_at[:19].replace('T',' ') if user.last_login_at else '—' }}
+      </div>
+    </div>
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-end gap-2 py-3">
+    <a href="/users" class="btn btn-secondary">Back</a>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save me-1"></i>Save
+    </button>
+  </div>
+</form>
+{% endblock %}

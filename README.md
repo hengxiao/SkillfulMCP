@@ -159,7 +159,7 @@ make env                   # copies .env.example → .env
 | `MCP_JWT_SECRET` | HMAC secret for signing JWTs. Long random string. Legacy single-key mode. |
 | `MCP_ADMIN_KEY` | Static `X-Admin-Key` header for catalog write endpoints. |
 | `MCP_WEBUI_SESSION_SECRET` | Signing secret for the Web UI session cookie (required when running the Web UI). |
-| `MCP_WEBUI_OPERATORS` | JSON list of `{email, password_hash}` entries — who can log into the Web UI. |
+| `MCP_WEBUI_OPERATORS` | JSON list of `{email, password_hash}` entries — **bootstrap only**. On first boot the `users` table is seeded from this list; after that, operator management happens in the Web UI `/users` pages. |
 
 Generate a bcrypt hash with:
 
@@ -288,7 +288,10 @@ make webui
 - Click a bundle file → viewer modal with syntax highlighting (Python, JS, TS, HTML, CSS, JSON, YAML, shell, etc.) or rendered markdown. Binary files show a download button.
 - **New version** button (immutable-version workflow): create a new version with copy/upload/none bundle semantics.
 - **Clone** button: rename a skill by creating a new id prefilled from the source.
-- Sidebar footer shows the logged-in operator + a CSRF-protected logout.
+- Sidebar footer shows the logged-in operator (email + role badge) + a CSRF-protected logout.
+- **Public / Private** toggle on every skill and skillset. Public items are visible to any authenticated agent regardless of grants.
+- **Users** page (admins only): list / create / edit / delete DB-backed operators. Roles are `admin` (full privileges) or `viewer` (read-only UI). The guard refuses to delete the last active admin.
+- **Account** page: self-service password change for DB-backed users.
 - Mobile-friendly: sidebar collapses to a hamburger offcanvas.
 
 Every mutating form is CSRF-protected (hidden input + HTMX global header

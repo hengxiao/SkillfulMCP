@@ -25,6 +25,25 @@ from .auth import get_session_operator, verify_csrf
 from .config import get_settings
 
 
+def require_role(*allowed: str):
+    """FastAPI dep factory — fails with 403 if the session operator's role
+    is not in `allowed`. Unauth'd users are handled by AuthMiddleware
+    before this runs, so we only need to guard against role mismatch
+    here."""
+
+    def _dep(request: Request) -> None:
+        op = get_session_operator(request)
+        if op is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        if op.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"role {op.role!r} not permitted",
+            )
+
+    return _dep
+
+
 # Paths that never require a session. Keep this tight.
 _DEFAULT_AUTH_EXEMPT: frozenset[str] = frozenset({
     "/login",

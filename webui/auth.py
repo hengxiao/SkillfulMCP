@@ -18,8 +18,9 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 
-import bcrypt
 from fastapi import Request
+
+from mcp_server.pwhash import hash_password, verify_password  # re-exported
 
 from .config import Settings, get_settings, parse_operators
 
@@ -31,39 +32,37 @@ SESSION_KEY_CSRF = "csrf_token"
 @dataclass(frozen=True)
 class Operator:
     email: str
+    # Wave 8b: role is carried on the session so templates and the
+    # `require_role` dep can make authorization decisions without a
+    # round-trip to the server on every request.
+    role: str = "admin"
+    user_id: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Credential verification
-# ---------------------------------------------------------------------------
-
-_MAX_PASSWORD_BYTES = 72  # bcrypt's input limit; longer → truncated silently
-
-
-def _encode_password(plain: str) -> bytes:
-    """bcrypt rejects inputs > 72 bytes. Truncate at the byte level so the
-    behavior is deterministic — callers must know this cap."""
-    return plain.encode("utf-8")[:_MAX_PASSWORD_BYTES]
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    """bcrypt-verify. Bad hashes surface as False, not an exception."""
-    if not plain or not hashed:
-        return False
-    try:
-        return bcrypt.checkpw(_encode_password(plain), hashed.encode("utf-8"))
-    except ValueError:
-        # Malformed hash (wrong format / truncated). Treat as failed auth.
-        return False
-
-
-def hash_password(plain: str) -> str:
-    """Helper for the CLI + tests to generate a bcrypt hash."""
-    return bcrypt.hashpw(_encode_password(plain), bcrypt.gensalt()).decode("utf-8")
+# Re-exported from mcp_server.pwhash so existing imports keep working.
+__all__ = [
+    "Operator",
+    "hash_password",
+    "verify_password",
+    "authenticate",
+    "authenticate_via_server",
+    "get_session_operator",
+    "set_session_operator",
+    "clear_session",
+    "get_csrf_token",
+    "verify_csrf",
+]
 
 
 def authenticate(email: str, password: str, settings: Settings | None = None) -> Operator | None:
-    """Return an Operator if (email, password) matches the configured list."""
+    """Env-only fallback authenticator.
+
+    Wave 8b moves the source of truth to the `users` table on the
+    mcp_server. This function stays for backward-compat with tests and as
+    an emergency fallback when the server is unreachable but env
+    operators exist. The primary login path is
+    `authenticate_via_server` (see `main.login_submit`).
+    """
     settings = settings or get_settings()
     email = (email or "").strip().lower()
     ops = parse_operators(settings.operators_raw)
@@ -72,7 +71,30 @@ def authenticate(email: str, password: str, settings: Settings | None = None) ->
         return None
     if not verify_password(password, pw_hash):
         return None
-    return Operator(email=email)
+    # Env operators are implicitly admins — they predate roles.
+    return Operator(email=email, role="admin")
+
+
+async def authenticate_via_server(email: str, password: str) -> Operator | None:
+    """Ask the mcp_server to verify (email, password) against the users table.
+
+    Returns None on bad creds or transport error. Emits a log line on
+    transport error so ops can notice if the Web UI is talking to the
+    wrong server.
+    """
+    from .client import MCPClient, MCPError  # local to avoid cycle at import
+
+    try:
+        data = await MCPClient().authenticate_user(email, password)
+    except MCPError:
+        return None
+    if not data:
+        return None
+    return Operator(
+        email=data["email"],
+        role=data.get("role", "viewer"),
+        user_id=data.get("id"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -86,11 +108,19 @@ def get_session_operator(request: Request) -> Operator | None:
     email = raw.get("email")
     if not email:
         return None
-    return Operator(email=email)
+    return Operator(
+        email=email,
+        role=raw.get("role", "admin"),
+        user_id=raw.get("user_id"),
+    )
 
 
 def set_session_operator(request: Request, op: Operator) -> None:
-    request.session[SESSION_KEY_OPERATOR] = {"email": op.email}
+    request.session[SESSION_KEY_OPERATOR] = {
+        "email": op.email,
+        "role": op.role,
+        "user_id": op.user_id,
+    }
     # A new login gets a fresh CSRF token so a leaked pre-login token
     # cannot be replayed after auth.
     request.session[SESSION_KEY_CSRF] = secrets.token_urlsafe(32)
