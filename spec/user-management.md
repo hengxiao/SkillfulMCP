@@ -21,8 +21,8 @@ agents).
 
 Missing in between:
 
-- **"My skills"** — a normal user should CRUD the skills they created
-  without being able to touch someone else's.
+- **"My skills"** — a normal contributor should CRUD the skills they
+  created without being able to touch someone else's.
 - **Targeted sharing** — "let alice@customer.com and bob@customer.com
   view this skill without giving them operator accounts."
 
@@ -31,21 +31,95 @@ owner + per-resource allow list + public toggle.
 
 ---
 
-## 2. Roles
+## 2. Roles and hierarchy
 
-Wave 8b has `admin` and `viewer`. Wave 9 adds one more and redefines
-them:
+Wave 8b has a flat role set (`admin` / `viewer`). Wave 9 replaces it
+with a **four-level tree** rooted at a singleton `superadmin`:
 
-| Role | Capabilities |
-| ---- | ------------ |
-| `admin` | Everything. Manages users, sees / edits every resource regardless of owner, can impersonate. |
-| `user` | Normal operator. CRUD on the resources they **own**; read on resources shared with them (public, or their email on the allow list). |
-| `viewer` | Read-only. Can browse public items + items shared with them. Cannot create anything. |
+```
+                superadmin  (root, cannot be deleted)
+                /        \
+           admin         admin
+          /    \        /    \
+   contributor viewer  contributor viewer
+```
 
-The existing Wave 8b deployments have only `admin` and `viewer` users.
-Migration: every existing `admin` stays `admin`; existing `viewer`s stay
-`viewer`. The new `user` role is introduced alongside; admins can
-promote or create new users at any role.
+| Role | Can create | Can delete | Catalog capabilities |
+| ---- | ---------- | ---------- | -------------------- |
+| `superadmin` | `admin` | anyone except self | Everything in the catalog. Impersonate, reassign, sweep orphans. |
+| `admin` | `contributor`, `viewer` **under themselves** | their own descendants | See / edit everything in the catalog. Manage sharing, reassign owners within their subtree. |
+| `contributor` | — | — | CRUD on resources they **own**; read on public + shared-with-them. |
+| `viewer` | — | — | Read-only. Browse public + shared-with-them. No create. |
+
+Key rules:
+
+- **Exactly one `superadmin` exists at all times.** It is the root of
+  the tree and every other account has a `parent_user_id` pointing up.
+  The superadmin row cannot be deleted, cannot be demoted, and cannot
+  be disabled through the UI.
+- **Admins can only create `contributor` / `viewer` accounts.** They
+  cannot create other admins — only `superadmin` can. This keeps the
+  admin-creation audit trail narrow: who minted admin X? Always the
+  superadmin.
+- **An admin's management surface is their subtree.** They can edit
+  and delete accounts they (directly or transitively) created. They
+  cannot touch siblings, other admins' subtrees, or the superadmin.
+- Role transitions an admin can perform: `contributor ↔ viewer`
+  within their subtree. Promotions to `admin` are superadmin-only.
+
+### 2.1 Transition from Wave 8b
+
+Wave 8b deployments have N existing admins and M existing viewers, all
+flat. The `0004_user_hierarchy` migration:
+
+1. Adds `parent_user_id` (nullable).
+2. Picks the **oldest** existing `admin` by `created_at` and promotes
+   them to `superadmin` (updates `role` + sets `parent_user_id = NULL`).
+   Tie-breaks on lowest `id` for determinism.
+3. Every other existing admin becomes `admin` with
+   `parent_user_id = <the-new-superadmin.id>`.
+4. Every existing viewer becomes `viewer` with
+   `parent_user_id = <the-new-superadmin.id>`.
+5. Adds a CHECK / partial-unique constraint so only one row can have
+   `role = 'superadmin'` at a time (see §2.3 for the exact enforcement).
+
+Env-bootstrap behavior changes accordingly: on a fresh DB, the **first
+entry** of `MCP_WEBUI_OPERATORS` becomes `superadmin`; subsequent
+entries become `admin` under it. An empty table + empty env still logs
+the "refuse all logins" warning, same as today.
+
+### 2.2 `parent_user_id` column
+
+```python
+parent_user_id: Mapped[str | None] = mapped_column(
+    String,
+    ForeignKey("users.id", ondelete="RESTRICT"),
+    nullable=True, index=True,
+)
+```
+
+- `NULL` iff `role == "superadmin"`. Enforced by a CHECK:
+  `(parent_user_id IS NULL) = (role = 'superadmin')`.
+- `ON DELETE RESTRICT` — you cannot delete a user while they still
+  have children. The delete handler (§3.3) does the re-parenting
+  first, inside the same transaction.
+
+### 2.3 Superadmin singleton invariant
+
+Three layers guard the "exactly one superadmin" rule:
+
+1. **Unique partial index** on `role = 'superadmin'`:
+   `CREATE UNIQUE INDEX ix_users_one_superadmin ON users(role) WHERE role = 'superadmin'`
+   — any INSERT/UPDATE that would produce a second row errors out at
+   the DB level.
+2. **Service layer** refuses to delete / disable / demote a user whose
+   role is `superadmin`. Returns 409 with a helpful message.
+3. **UI** hides the delete / disable / role-change controls for the
+   superadmin row and substitutes a lock badge.
+
+A follow-up wave can add a "transfer superadmin" admin flow (promote
+someone else, then demote self), but it's out of scope here — the
+initial cut treats the role as set-once-at-bootstrap.
 
 ---
 
@@ -72,44 +146,125 @@ denormalized for two reasons:
    the admin UI — we want to see `"owned by deleted-user@corp.com"`
    rather than an empty cell.
 
-`ondelete="SET NULL"` at the FK level prevents cascading-deletes of
-catalog data, but we don't actually want orphans. The user-delete
-**handler** runs a reassignment step inside the same transaction before
-the row is removed:
+Deleting a user is never a "nuke the row" operation — it always
+triggers a reassignment step that moves **child accounts** and
+**owned catalog rows** onto a new account in the same transaction, so
+the hierarchy and the permission model stay whole.
+
+There are two reassignment targets the caller can choose between:
+
+#### 3.3.1 Default: reassign to the deleted user's parent
+
+If the caller doesn't specify a target, the deleted user's parent
+inherits everything. No promotion needed — a parent is always at
+least one tier above the child (admin parent → contributor/viewer
+child; superadmin parent → admin child).
 
 ```python
-def delete_user(db, user_id, *, acting_admin_id: str) -> bool:
-    # Reassign the deleted user's owned items to the admin performing
-    # the delete. Keeps a live owner on every row so nothing falls
-    # through the cracks of permission checks.
-    db.query(Skill).filter(Skill.owner_user_id == user_id).update({
-        "owner_user_id": acting_admin_id,
-        "owner_email_snapshot": _email_of(db, acting_admin_id),
+def delete_user(db, user_id, *, new_owner_id: str | None = None) -> bool:
+    victim = db.get(User, user_id)
+    if victim is None:
+        return False
+    if victim.role == "superadmin":
+        raise ValueError("Cannot delete the superadmin")
+
+    target_id = new_owner_id or victim.parent_user_id
+    _reassign_and_delete(db, victim, target_id)
+    return True
+
+
+def _reassign_and_delete(db, victim, target_id):
+    # 1. Re-parent children. `parent_user_id` FK is ON DELETE RESTRICT,
+    #    so this must happen before the DELETE or the row won't leave.
+    db.query(User).filter(User.parent_user_id == victim.id).update({
+        "parent_user_id": target_id,
     })
-    db.query(Skillset).filter(Skillset.owner_user_id == user_id).update(...)
-    db.delete(user)
+
+    # 2. Reassign owned catalog rows to the same target.
+    target_email = _email_of(db, target_id)
+    db.query(Skill).filter(Skill.owner_user_id == victim.id).update({
+        "owner_user_id": target_id,
+        "owner_email_snapshot": target_email,
+    })
+    db.query(Skillset).filter(Skillset.owner_user_id == victim.id).update(...)
+
+    # 3. Promote target if the inheritance requires it (see 3.3.2).
+    _maybe_promote(db, target_id, victim)
+
+    # 4. Drop the victim row.
+    db.delete(victim)
     db.commit()
 ```
 
-The acting admin's id is taken from the session — the HTTP handler
-passes it through, so the service layer never has to guess. Emits a
-structured log line per reassigned row for the audit trail.
+#### 3.3.2 Operator-picked target with auto-promotion
 
-Why reassign-to-deleter (rather than NULL + manual cleanup):
+The UI exposes a "Reassign to a specific account" option on the
+delete dialog (§6.2.1). The handler receives `new_owner_id` and
+validates:
 
-- Keeps every catalog row with a live owner at all times. Permission
-  checks stay simple — no special case for "orphan" rows.
-- "You deleted them, you own the mess" is the least surprising
-  default for the admin driving the action. They can transfer
-  ownership onward after the fact using the standard reassign flow
-  (§6.2).
-- Admin-key CLI deletes (no session) fall back to SET NULL. Those
-  rows surface on a new `/users/orphans` admin page so the ops team
-  can sweep them.
+- The target exists and is in the **caller's management surface**
+  (their subtree, or anyone if caller is `superadmin`).
+- The target is not the victim themselves.
+- The target is not a descendant of the victim — reassigning to
+  someone whose `parent_user_id` chains back through the victim
+  would orphan them mid-transaction. The handler rejects this with
+  409 and a hint.
 
-The FK stays `ON DELETE SET NULL` as a safety net for the CLI path
-and for any future direct-DB surgery; the handler is the primary
-ownership policy, not the database.
+Because the chosen target may be a peer or sibling of the victim
+(not a parent), its current role can be too low to hold what it's
+inheriting. The auto-promotion rule:
+
+| Victim's role | Inherited from victim | Minimum target role |
+| ------------- | --------------------- | -------------------- |
+| `admin` | child contributors/viewers + owned catalog | `admin` |
+| `contributor` | owned catalog rows (no children) | `contributor` |
+| `viewer` | nothing (viewers own nothing, have no children) | `viewer` (no-op) |
+
+Concretely:
+
+- Delete an **admin**, reassign to a `contributor` → target promoted
+  to `admin`. Delete an admin, reassign to a `viewer` → target
+  promoted to `admin`. (Viewers never have subordinates today, but
+  the moment they inherit any, they stop being viewers.)
+- Delete a **contributor**, reassign to a `viewer` → target promoted
+  to `contributor`. Reassign to another `contributor` or `admin` →
+  no change.
+- Only `superadmin` can promote someone to `admin`. If the caller
+  is an `admin` and the chosen target would need promotion to
+  `admin` to hold the inheritance, the handler returns 403 with
+  "choose an existing admin or ask the superadmin to perform this
+  delete." This keeps the rule "only superadmins mint admins"
+  (§2) honest even through the delete path.
+
+Promotion bumps are logged as a structured event (`user.promoted`,
+with `reason=inheritance`) so the audit trail captures any role
+change the operator didn't explicitly click for.
+
+#### 3.3.3 Safety nets
+
+- `acting_admin_id` (session) is passed to the HTTP handler; the
+  handler validates both "can I delete this victim?" and "can I
+  reassign to this target?" before calling the service. The service
+  enforces hierarchy invariants (singleton superadmin, no cycles,
+  parent exists) but doesn't decide authorization.
+- Admin-key CLI deletes (no session) still call the service with
+  `new_owner_id` either explicit (CLI flag) or defaulted to the
+  victim's parent. No orphan rows.
+- The FK on `owner_user_id` stays `ON DELETE SET NULL` as a safety
+  net for direct-DB surgery that bypasses the service entirely. Any
+  rows that end up orphaned that way surface on a `/users/orphans`
+  admin sweep page (9.1).
+
+Why the handler-level reassignment (rather than just SET NULL):
+
+- Keeps every catalog row with a live owner at all times.
+  Permission checks never have a special "orphan" branch.
+- Keeps the hierarchy total — no floating subtrees. The tree
+  invariants at §2 can be checked with a single recursive query
+  against `parent_user_id` without needing to exclude orphan roots.
+- Deterministic regardless of who triggers the delete — two admins
+  performing the same action (same victim, same target) leave the
+  DB in the same state.
 
 ### 3.2 Semantics
 
@@ -119,8 +274,8 @@ ownership policy, not the database.
 - Items created via the admin-key CLI path (no session) land with
   `owner_user_id = NULL`; admins manage these explicitly. Adding an
   owner is a one-click action in the UI.
-- Ownership transfer is admin-only. A user cannot hand their skill
-  to someone else without admin involvement.
+- Ownership transfer is admin-only. A contributor cannot hand their
+  skill to someone else without admin involvement.
 
 ### 3.3 Migration for existing rows
 
@@ -187,7 +342,7 @@ Visibility check (replaces the Wave 8a rule):
 def can_read(resource, user) -> bool:
     if resource.visibility == "public":
         return True
-    if user and user.role == "admin":
+    if user and user.role in ("admin", "superadmin"):
         return True
     if user and resource.owner_user_id == user.id:
         return True
@@ -227,6 +382,8 @@ can add SMTP config + a "invite" flow that mails the grantee a link.
 
 ### 5.1 New endpoints
 
+Sharing:
+
 ```
 POST   /skills/{id}/shares       body: {email}      owner/admin only
 GET    /skills/{id}/shares                           owner/admin only
@@ -237,15 +394,36 @@ GET    /skillsets/{id}/shares
 DELETE /skillsets/{id}/shares/{share_id}
 ```
 
+User-management (extends Wave 8b `/admin/users/*`):
+
+```
+POST   /admin/users                body: {email, password, role,
+                                          display_name, parent_user_id}
+  - `role` allowed values depend on caller: admin can only create
+    contributor / viewer; superadmin can additionally create admin.
+  - `parent_user_id` defaults to the caller's id. Admins can only
+    specify themselves (or descend into their subtree for
+    re-parenting flows). Superadmin can specify any admin.
+
+DELETE /admin/users/{id}          query: ?new_owner_id=<uid>   # optional
+  - No query param → reassign to deleted user's parent (default).
+  - `new_owner_id=<uid>` → reassign the subtree + owned catalog rows
+    to that account instead. Auto-promotes the target if its role
+    is below what it needs to inherit (see §3.3.2).
+
+GET    /admin/users/{id}/descendants   # subtree listing for admins
+```
+
 ### 5.2 Modified endpoints
 
 - `POST /skills` and `POST /skillsets`: stamp `owner_user_id` from the
   session. Admin-key-only callers (CLI) get `NULL` ownership.
 - `GET /skills` and `GET /skillsets`: filter to items the caller can
-  see per §4.3. Admins see everything; users see owned + shared +
-  public. Query param `?mine=1` narrows to "owned by me".
-- `PUT` / `DELETE` on skills / skillsets: require ownership OR
-  `admin` role. 403 otherwise.
+  see per §4.3. `superadmin` and `admin` see everything;
+  `contributor` / `viewer` see owned + shared + public. Query param
+  `?mine=1` narrows to "owned by me".
+- `PUT` / `DELETE` on skills / skillsets: require ownership OR a
+  managing role (`admin` / `superadmin`). 403 otherwise.
 
 ### 5.3 Validation
 
@@ -283,10 +461,47 @@ Replace the existing visibility radio with a richer **Sharing** card:
 └──────────────────────────────────────────────┘
 ```
 
-### 6.3 Users page (admins only, Wave 8b)
+### 6.2.1 Delete-user dialog
 
-No schema change. Add an "Owns" column counting owned skills +
-skillsets, linking to a filtered list.
+Clicking Delete on a user row opens a modal instead of issuing the
+DELETE immediately:
+
+```
+┌─ Delete user: alice@customer.com ─────────────────────────┐
+│ This user owns 3 skills and 1 skillset.                   │
+│ This user manages 2 accounts (bob@x.com, carol@x.com).    │
+│                                                            │
+│ Reassign everything to:                                    │
+│   ● alice's parent (default) — you, admin@ops.com         │
+│   ○ Someone else:     [ dropdown of accounts in subtree ] │
+│                                                            │
+│ ⚠ If reassigning to a contributor / viewer, they'll be    │
+│   promoted to admin so they can manage inherited accounts.│
+│                                                            │
+│  [ Cancel ]                              [ Delete user ]  │
+└────────────────────────────────────────────────────────────┘
+```
+
+The promotion warning renders conditionally — the form inspects the
+target's current role + what the victim carries and shows the exact
+transition ("Promote bob@x.com from contributor → admin"). Admin-tier
+promotions are only offered when the logged-in caller is a superadmin
+(§3.3.2).
+
+### 6.3 Users page
+
+Replaces the Wave 8b flat list with a subtree view:
+
+- Superadmin sees the whole tree (indented rows, collapsible).
+- Admin sees themselves + their descendants.
+- Each row shows role, email, "Owns" count (skills + skillsets),
+  "Manages" count (direct children), last login.
+- Superadmin row has a lock badge and no delete / disable controls
+  (§2.3).
+- "New user" button on every admin's row scope-limits the create
+  form to `contributor` / `viewer` with `parent_user_id` pre-filled;
+  the superadmin's button additionally allows `admin` with any
+  target parent.
 
 ### 6.4 Account page
 
@@ -321,19 +536,27 @@ operator session can't silently expand an agent's reach.
 
 ## 8. Role check implementation
 
-A new dependency, analogous to the Wave 8b `require_role`:
+Two new dependencies, layered on the Wave 8b `require_role`:
 
 ```python
 def require_ownership_or_role(resource_kind: str, *allowed_roles: str):
     """FastAPI dep factory — fails with 403 unless the session operator
     either (a) owns the path-id'd resource or (b) has one of
-    `allowed_roles`."""
+    `allowed_roles`. `admin` and `superadmin` always pass the role
+    gate."""
+
+def require_ancestor_of(path_param: str = "user_id"):
+    """FastAPI dep factory for `/admin/users/{user_id}` routes —
+    fails with 403 unless the session operator is an ancestor of the
+    target user in the hierarchy, OR is the superadmin."""
 ```
 
-Used on every mutating `/skills/{id}` and `/skillsets/{id}` route.
+Gating:
 
-Viewers (`role=viewer`) cannot create anything; the existing
-`require_role("admin", "user")` dep goes on POST endpoints.
+- `POST /skills`, `POST /skillsets` → `require_role("contributor", "admin", "superadmin")` (viewers can't create).
+- `PUT`/`DELETE` on skills / skillsets → `require_ownership_or_role("admin", "superadmin")`.
+- `/admin/users/*` mutations → `require_ancestor_of("user_id")`.
+- Promoting to `admin` (either direct or via delete-reassign auto-promote) → superadmin-only (checked inside the handler, not a dep, because it's a conditional branch).
 
 ---
 
@@ -341,6 +564,15 @@ Viewers (`role=viewer`) cannot create anything; the existing
 
 Test suites to add (parallel to Wave 8b's `test_users.py`):
 
+- `tests/test_hierarchy.py` — migration from the flat 8b model;
+  singleton-superadmin invariant (DB-level uniqueness + service
+  refusal); cycle detection on reassignment; `require_ancestor_of`
+  dep rejects cross-subtree requests.
+- `tests/test_user_delete.py` — default reassignment to parent;
+  operator-picked target with auto-promotion (contributor → admin,
+  viewer → contributor / admin); admin cannot pick a target that would
+  need promotion to `admin` (403); superadmin can; reassigning to
+  a descendant of the victim returns 409.
 - `tests/test_ownership.py` — service layer: create stamps owner;
   update by non-owner 403s; admin can update anything; owner can't
   transfer.
@@ -351,9 +583,12 @@ Test suites to add (parallel to Wave 8b's `test_users.py`):
   list endpoints + GET filtering.
 - `tests/test_webui_sharing.py` — template renders share list, add /
   remove UX forwards the correct payload.
+- `tests/test_webui_user_delete.py` — delete-user modal shows the
+  correct promotion warning based on target + victim; form POSTs
+  `new_owner_id`.
 
-Target: keep the 85% coverage gate. New code is ~400 LoC; tests
-should add ~300 LoC.
+Target: keep the 85% coverage gate. New code is ~650 LoC; tests
+should add ~500 LoC.
 
 ---
 
@@ -371,10 +606,22 @@ should add ~300 LoC.
 - Email invitations when a share is added. Requires SMTP config; ship
   separately (Wave 9.1).
 - Configurable fallback owner (e.g., `MCP_CATALOG_FALLBACK_OWNER_EMAIL`)
-  for the user-delete reassignment. Wave 9 hard-codes "reassign to the
-  acting admin" because that's the least surprising default and avoids
-  another config knob. Add the override if an org complains that their
-  "ops-bot" service account should absorb deletions instead.
+  as an implicit reassignment target. Wave 9 requires the operator to
+  explicitly pick a target via the delete dialog (or accept the
+  parent default). Add the env override if an org complains that
+  their "ops-bot" service account should absorb deletions instead.
+- "Transfer superadmin" flow (promote an existing admin to
+  superadmin then demote self). Wave 9 treats the superadmin role
+  as set-once-at-bootstrap. Worth doing when the role's owner
+  changes — scope that wave to include a one-time-token confirmation
+  step so it's not a single-click hand-off.
+- Demotion-on-delete (e.g., auto-demote an admin back to contributor
+  if they end up with no subordinates after a reassignment away from
+  them).
+  Deliberately skipped: promotions triggered by inheritance are safe,
+  but automatic demotion surprises the operator and can drop
+  capabilities they still rely on. Admins demote via the explicit
+  edit flow instead.
 
 ---
 
@@ -382,13 +629,17 @@ should add ~300 LoC.
 
 | Step | Deliverable |
 | ---- | ----------- |
-| 9.0 | Role rename (`viewer` stays, add `user`) + `require_role` update |
-| 9.1 | Migration `0004_ownership` + stamp owner in POST handlers |
-| 9.2 | Filter GET lists by ownership + new `?mine=` / `?shared=` params |
-| 9.3 | Migration `0005_shares` + `/shares` CRUD endpoints |
-| 9.4 | Web UI: Sharing card, Owner column, My Catalog page |
-| 9.5 | Admin: reassign-ownership UI |
-| 9.x | (optional) SMTP invitations |
+| 9.0 | Migration `0004_user_hierarchy`: add `parent_user_id`, introduce `superadmin` + `contributor` roles, promote oldest admin, re-parent everyone to it. Unique partial index on superadmin. Service-layer invariants + `require_ancestor_of` dep. |
+| 9.1 | Migration `0005_ownership`: `owner_user_id` + `owner_email_snapshot` on skills/skillsets. Stamp owner server-side on POST. New `/admin/users/{id}/descendants` endpoint. |
+| 9.2 | Filter GET lists by ownership + new `?mine=` / `?shared=` params. |
+| 9.3 | Migration `0006_shares`: `skill_shares` / `skillset_shares` tables + `/shares` CRUD endpoints. |
+| 9.4 | Web UI: sharing card, Owner column, My Catalog page, subtree users page. |
+| 9.5 | Delete-user modal with reassignment-target picker + auto-promotion preview. New `new_owner_id` query param on `DELETE /admin/users/{id}`. |
+| 9.6 | Admin-led explicit ownership reassignment for catalog rows (separate from the delete flow). |
+| 9.x | (optional) SMTP invitations; (optional) transfer-superadmin flow. |
 
-Each sub-step ships independently. 9.1 without 9.3 is still useful —
-you get per-user "my skills" even before allow lists land.
+Each sub-step ships independently, but there's a hard dependency
+order at the bottom: 9.0 must land before 9.1 (ownership needs a
+hierarchy to resolve against on delete), and 9.3 must land before
+9.4's sharing card has anything to render. 9.2 and 9.5 can ship in
+either order once 9.1 is in.
