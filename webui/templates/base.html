@@ -152,6 +152,9 @@
     <a class="nav-link {% if active == 'skills' %}active{% endif %}" href="/skills">
       <i class="bi bi-lightning"></i><span>Skills</span>
     </a>
+    <a class="nav-link {% if active == 'agents' %}active{% endif %}" href="/agents">
+      <i class="bi bi-robot"></i><span>Agents</span>
+    </a>
     {% if operator and operator.role == 'admin' %}
     <a class="nav-link {% if active == 'users' %}active{% endif %}" href="/users">
       <i class="bi bi-people"></i><span>Users</span>

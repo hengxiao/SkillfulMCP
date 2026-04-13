@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Token minted — {{ agent.id }} — SkillfulMCP{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/agents">Agents</a></li>
+    <li class="breadcrumb-item">{{ agent.id }}</li>
+    <li class="breadcrumb-item active">token</li>
+  </ol>
+</nav>
+
+<div class="alert alert-warning d-flex gap-2 mb-4" role="alert">
+  <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+  <div>
+    <strong>Save this token now.</strong> The server does not store it;
+    once you leave this page, it cannot be shown again. If lost, revoke
+    via <code>/admin/tokens/revoke</code> and mint a new one.
+  </div>
+</div>
+
+<h2 class="mb-3 fw-bold">
+  <i class="bi bi-key-fill text-success me-2"></i>Token for <code>{{ agent.id }}</code>
+</h2>
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white fw-semibold border-bottom pt-3 d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-file-earmark-lock me-1"></i> Access token (JWT)</span>
+    <button class="btn btn-sm btn-outline-primary" type="button"
+            onclick="copyToken()" id="copy-btn">
+      <i class="bi bi-clipboard me-1"></i>Copy
+    </button>
+  </div>
+  <div class="card-body">
+    <textarea id="token-box" class="form-control font-monospace small" rows="6"
+              readonly onclick="this.select()">{{ access_token }}</textarea>
+    <div class="form-text">
+      Expires in <strong>{{ expires_in }}</strong> seconds
+      (~{{ (expires_in / 60) | round(0, 'floor') | int }} min).
+    </div>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white fw-semibold border-bottom pt-3">
+    <i class="bi bi-shield-check me-1"></i> Embedded grants
+  </div>
+  <div class="card-body">
+    <dl class="row mb-0">
+      <dt class="col-sm-3 text-muted">Skillsets</dt>
+      <dd class="col-sm-9">
+        {% set ss = issued_skillsets if issued_skillsets is not none else agent.skillsets %}
+        {% for s in ss %}<span class="badge bg-secondary me-1">{{ s }}</span>{% else %}<span class="text-muted small">—</span>{% endfor %}
+        {% if issued_skillsets is not none and issued_skillsets != agent.skillsets %}
+          <span class="badge bg-warning text-dark ms-2">narrowed</span>
+        {% endif %}
+      </dd>
+      <dt class="col-sm-3 text-muted mt-2">Skills</dt>
+      <dd class="col-sm-9 mt-2">
+        {% set sk = issued_skills if issued_skills is not none else agent.skills %}
+        {% for s in sk %}<span class="badge bg-light text-dark border me-1">{{ s }}</span>{% else %}<span class="text-muted small">—</span>{% endfor %}
+        {% if issued_skills is not none and issued_skills != agent.skills %}
+          <span class="badge bg-warning text-dark ms-2">narrowed</span>
+        {% endif %}
+      </dd>
+      <dt class="col-sm-3 text-muted mt-2">Scope</dt>
+      <dd class="col-sm-9 mt-2">
+        {% set sc = issued_scope if issued_scope is not none else agent.scope %}
+        {% for s in sc %}<span class="badge bg-info text-dark me-1">{{ s }}</span>{% else %}<span class="text-muted small">—</span>{% endfor %}
+        {% if issued_scope is not none and issued_scope != agent.scope %}
+          <span class="badge bg-warning text-dark ms-2">narrowed</span>
+        {% endif %}
+      </dd>
+    </dl>
+  </div>
+</div>
+
+<a href="/agents" class="btn btn-secondary">Back to agents</a>
+
+<script>
+  function copyToken() {
+    const box = document.getElementById('token-box');
+    navigator.clipboard.writeText(box.value).then(() => {
+      const btn = document.getElementById('copy-btn');
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Copied';
+      setTimeout(() => { btn.innerHTML = orig; }, 1500);
+    });
+  }
+</script>
+{% endblock %}

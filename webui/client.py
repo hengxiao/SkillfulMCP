@@ -161,6 +161,14 @@ class MCPClient:
     async def list_agents(self) -> list[dict]:
         return await self._request("GET", "/agents")
 
+    async def get_agent(self, agent_id: str) -> dict:
+        return await self._request("GET", f"/agents/{agent_id}")
+
+    async def issue_token(self, data: dict) -> dict:
+        """Wave 8c: `data` may carry optional `skills` / `skillsets` /
+        `scope` narrowing lists."""
+        return await self._request("POST", "/token", json=data)
+
     # ------------------------------------------------------------------
     # Users (admin endpoints — Wave 8b)
     # ------------------------------------------------------------------

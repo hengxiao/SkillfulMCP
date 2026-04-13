@@ -682,6 +682,80 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ #
 
     # ------------------------------------------------------------------ #
+    # Agents + token issuance (Wave 8c)                                   #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/agents", response_class=HTMLResponse)
+    async def agents_page(request: Request, msg: str = "", msg_type: str = "success"):
+        try:
+            agents = await get_client().list_agents()
+            error = None
+        except MCPError as exc:
+            agents, error = [], str(exc)
+        return _render(request, "agents.html", {
+            "active": "agents",
+            "agents": agents,
+            "error": error,
+            **_flash_ctx(msg, msg_type),
+        })
+
+    @app.get("/agents/{agent_id}/tokens/new", response_class=HTMLResponse,
+             dependencies=[Depends(require_role("admin"))])
+    async def token_mint_form(request: Request, agent_id: str):
+        try:
+            agent = await get_client().get_agent(agent_id)
+        except MCPError as exc:
+            return _redirect("/agents", str(exc), "error")
+        return _render(request, "token_new.html", {
+            "active": "agents",
+            "agent": agent,
+            "error": None,
+            **_flash_ctx("", "success"),
+        })
+
+    @app.post("/agents/{agent_id}/tokens",
+              dependencies=CSRF + [Depends(require_role("admin"))])
+    async def token_mint_submit(
+        request: Request,
+        agent_id: str,
+        expires_in: Annotated[int, Form()] = 3600,
+        skills: Annotated[list[str], Form()] = [],
+        skillsets: Annotated[list[str], Form()] = [],
+        scope: Annotated[list[str], Form()] = [],
+    ):
+        """Mint a narrowed token. Empty list means "inherit all agent
+        grants"; any checkbox selection narrows to just those. The
+        resulting token is rendered once — never stored anywhere."""
+        payload: dict = {"agent_id": agent_id, "expires_in": expires_in}
+        # An empty list from the form means "leave field default"; we
+        # distinguish by also inspecting the raw form so "no checkboxes"
+        # defaults to the agent's full grants instead of stripping them.
+        form = await request.form()
+        if "_skills_present" in form:
+            payload["skills"] = skills
+        if "_skillsets_present" in form:
+            payload["skillsets"] = skillsets
+        if "_scope_present" in form:
+            payload["scope"] = scope
+        try:
+            tok = await get_client().issue_token(payload)
+        except MCPError as exc:
+            return _redirect(f"/agents/{agent_id}/tokens/new", str(exc), "error")
+        try:
+            agent = await get_client().get_agent(agent_id)
+        except MCPError:
+            agent = {"id": agent_id, "name": agent_id}
+        return _render(request, "token_result.html", {
+            "active": "agents",
+            "agent": agent,
+            "access_token": tok["access_token"],
+            "expires_in": tok["expires_in"],
+            "issued_skills": payload.get("skills"),
+            "issued_skillsets": payload.get("skillsets"),
+            "issued_scope": payload.get("scope"),
+        })
+
+    # ------------------------------------------------------------------ #
     # User management (admin only) + self-service /account                #
     # ------------------------------------------------------------------ #
 

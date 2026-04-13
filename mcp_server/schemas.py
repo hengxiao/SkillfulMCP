@@ -199,6 +199,25 @@ class AgentResponse(BaseModel):
 class TokenRequest(BaseModel):
     agent_id: str
     expires_in: int = 3600
+    # Wave 8c: optional narrowing. When supplied, the issued token's
+    # `skills` / `skillsets` / `scope` claims use these values instead of
+    # the agent's full grants. Each list MUST be a subset of the agent's
+    # own list, otherwise the server 400s — a compromised admin key still
+    # can't mint broader tokens than the registered agent allows.
+    skills: list[str] | None = None
+    skillsets: list[str] | None = None
+    scope: list[str] | None = None
+
+    @field_validator("scope")
+    @classmethod
+    def _scope(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            invalid = set(v) - VALID_SCOPES
+            if invalid:
+                raise ValueError(
+                    f"Invalid scope value(s): {invalid}. Valid: {sorted(VALID_SCOPES)}"
+                )
+        return v
 
 
 class TokenResponse(BaseModel):

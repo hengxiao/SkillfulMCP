@@ -266,11 +266,31 @@ Landed in commit after 8a. Ships:
 - Tests: `tests/test_users.py` (service + HTTP layers) and
   `tests/test_webui_users.py` (page rendering + role gating).
 
-### Wave 8c (token issuance UI)
+### Wave 8c (token issuance UI) — **shipped**
 
-Layers on top of the user identity from 8b. Requires the optional
-`issued_tokens` table for the listing UI. The narrowing endpoint is a
-small extension to existing `POST /token`.
+Ships:
+
+- `POST /token` now accepts optional `skills` / `skillsets` / `scope`
+  lists. Each MUST be a subset of the registered agent's own grants;
+  anything outside 400s. Absent fields keep the agent's full grants
+  (unchanged behavior).
+- `TokenService.issue_token` passes narrowed lists straight into the
+  JWT claims, so `resolve_allowed_skill_ids` and the authorization
+  layer see the narrowed view without any extra coupling.
+- Web UI pages: `/agents` (list with a per-row Mint button, admin-only
+  action), `/agents/{id}/tokens/new` (wizard with checkboxes prefilled
+  from the agent's grants + expires_in slider), and a one-time
+  `token_result.html` view with copy-to-clipboard. Tokens are never
+  stored; leaving the page loses the token. Revoke via
+  `/admin/tokens/revoke` if needed.
+- The `issued_tokens` listing table called out in the original plan is
+  deferred — revocation already works via `jti`, and the one-shot
+  mint+copy flow covers the primary ops use case. Shipping the table
+  becomes a follow-up when there's demand for a per-agent token
+  history / bulk-revoke UI.
+- Tests: `tests/test_token_narrowing.py` (subset rule, claim values,
+  end-to-end narrow-then-read) and `tests/test_webui_tokens.py`
+  (wizard prefill, narrowed POST, error redirects).
 
 ---
 

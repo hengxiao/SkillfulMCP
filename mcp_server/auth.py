@@ -58,7 +58,22 @@ class TokenService:
     # Issuance
     # ------------------------------------------------------------------
 
-    def issue_token(self, agent: Agent, expires_in: int = 3600) -> str:
+    def issue_token(
+        self,
+        agent: Agent,
+        expires_in: int = 3600,
+        *,
+        skills: list[str] | None = None,
+        skillsets: list[str] | None = None,
+        scope: list[str] | None = None,
+    ) -> str:
+        """Mint a JWT for `agent`.
+
+        Wave 8c: optional narrowing. When `skills` / `skillsets` / `scope`
+        are supplied, the issued token's claims carry these narrowed
+        values (and they MUST be subsets of the agent's registered
+        grants; callers validate that upstream before calling).
+        """
         capped = max(1, min(int(expires_in), self.max_lifetime_seconds))
         if capped != expires_in:
             _log.info(
@@ -77,9 +92,9 @@ class TokenService:
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(seconds=capped)).timestamp()),
             "jti": uuid.uuid4().hex,
-            "skillsets": agent.skillsets or [],
-            "skills": agent.skills or [],
-            "scope": agent.scope or [],
+            "skillsets": skillsets if skillsets is not None else (agent.skillsets or []),
+            "skills": skills if skills is not None else (agent.skills or []),
+            "scope": scope if scope is not None else (agent.scope or []),
         }
         return jwt.encode(
             claims,
@@ -169,8 +184,18 @@ def reset_default_service() -> None:
 # Module-level shims preserved for backwards compatibility
 # ---------------------------------------------------------------------------
 
-def issue_token(agent: Agent, expires_in: int = 3600) -> str:
-    return get_default_service().issue_token(agent, expires_in=expires_in)
+def issue_token(
+    agent: Agent,
+    expires_in: int = 3600,
+    *,
+    skills: list[str] | None = None,
+    skillsets: list[str] | None = None,
+    scope: list[str] | None = None,
+) -> str:
+    return get_default_service().issue_token(
+        agent, expires_in=expires_in,
+        skills=skills, skillsets=skillsets, scope=scope,
+    )
 
 
 def validate_token(token: str) -> dict[str, Any]:

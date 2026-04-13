@@ -292,6 +292,7 @@ make webui
 - **Public / Private** toggle on every skill and skillset. Public items are visible to any authenticated agent regardless of grants.
 - **Users** page (admins only): list / create / edit / delete DB-backed operators. Roles are `admin` (full privileges) or `viewer` (read-only UI). The guard refuses to delete the last active admin.
 - **Account** page: self-service password change for DB-backed users.
+- **Agents** page + **Mint token** wizard: pick an agent, optionally uncheck skills / skillsets / scope entries to narrow the JWT below the agent's registered grants, set expiry, get a one-time copyable token.
 - Mobile-friendly: sidebar collapses to a hamburger offcanvas.
 
 Every mutating form is CSRF-protected (hidden input + HTMX global header

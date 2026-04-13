@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Mint token — {{ agent.id }} — SkillfulMCP{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/agents">Agents</a></li>
+    <li class="breadcrumb-item">{{ agent.id }}</li>
+    <li class="breadcrumb-item active">mint token</li>
+  </ol>
+</nav>
+
+<h2 class="mb-1 fw-bold">
+  <i class="bi bi-key text-primary me-2"></i>Mint token for <code>{{ agent.id }}</code>
+</h2>
+<p class="text-muted">
+  Uncheck any grant below to narrow the token. Leaving a section fully
+  checked keeps the agent's full grant set. The token is shown <strong>once</strong>
+  after minting — save it before leaving the page.
+</p>
+
+<form method="post" action="/agents/{{ agent.id }}/tokens"
+      class="card border-0 shadow-sm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="card-body">
+
+    <div class="mb-4">
+      <label class="form-label fw-semibold">Expires in (seconds)</label>
+      <input type="number" name="expires_in" class="form-control" style="max-width: 200px;"
+             value="3600" min="60" max="86400" required>
+      <div class="form-text">Server clamps at <code>MCP_MAX_TOKEN_LIFETIME_SECONDS</code> (default 24h).</div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Skillsets</label>
+        <input type="hidden" name="_skillsets_present" value="1">
+        {% if agent.skillsets %}
+        {% for s in agent.skillsets %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="skillsets"
+                 id="ss-{{ loop.index }}" value="{{ s }}" checked>
+          <label class="form-check-label font-monospace small" for="ss-{{ loop.index }}">{{ s }}</label>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-muted small">Agent has no skillset grants.</p>
+        {% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Skills</label>
+        <input type="hidden" name="_skills_present" value="1">
+        {% if agent.skills %}
+        {% for s in agent.skills %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="skills"
+                 id="sk-{{ loop.index }}" value="{{ s }}" checked>
+          <label class="form-check-label font-monospace small" for="sk-{{ loop.index }}">{{ s }}</label>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-muted small">Agent has no direct skill grants.</p>
+        {% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">Scope</label>
+        <input type="hidden" name="_scope_present" value="1">
+        {% if agent.scope %}
+        {% for s in agent.scope %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="scope"
+                 id="sc-{{ loop.index }}" value="{{ s }}" checked>
+          <label class="form-check-label font-monospace small" for="sc-{{ loop.index }}">{{ s }}</label>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-muted small">Agent has no scope grants.</p>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+  <div class="card-footer bg-white d-flex justify-content-end gap-2 py-3">
+    <a href="/agents" class="btn btn-secondary">Cancel</a>
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-key me-1"></i>Mint token
+    </button>
+  </div>
+</form>
+{% endblock %}
