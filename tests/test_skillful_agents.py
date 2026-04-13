@@ -13,15 +13,23 @@ with monkeypatching so they run without a live MCP server, and verify:
 from __future__ import annotations
 
 import pytest
-from langchain_core.runnables import Runnable
 
-from example.skillful import (
+# The example agents depend on framework SDKs (langchain, openai,
+# anthropic, etc.) that are only installed when `pip install -e
+# ".[examples]"` is used. In CI's Postgres job those extras are skipped
+# on purpose — skip the whole module there instead of failing at import.
+Runnable = pytest.importorskip("langchain_core.runnables").Runnable
+pytest.importorskip("anthropic")
+pytest.importorskip("openai")
+pytest.importorskip("langgraph")
+
+from example.skillful import (  # noqa: E402
     SkillfulAnthropicAgent,
     SkillfulLangChainAgent,
     SkillfulLangGraphAgent,
     SkillfulOpenAIAgent,
 )
-from example.skillful import _base as skillful_base
+from example.skillful import _base as skillful_base  # noqa: E402
 
 
 SAMPLE_SKILLS = [
