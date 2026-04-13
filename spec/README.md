@@ -32,6 +32,7 @@ Implementation (high-level):
 - `migrations.md` — Alembic workflow: when migrations run, how to create and review them, conventions, and the Postgres dev/test story.
 - `deployment.md` — Dockerfiles, docker-compose local stack, Helm chart, GitHub Actions CI, operational runbook (Wave 7).
 - `deployment-azure.md` — phased Azure deployment plan (Container Apps + Postgres Flex + Key Vault + Entra OIDC + Blob bundle store + ACS Email).
+- [`integrations/claude-code.md`](integrations/claude-code.md) — three patterns for plugging a deployed catalog into Claude Code (skill sync, MCP-protocol bridge, slash command).
 - `testing.md` — test pyramid, current coverage (85.2%), fuzz suite, regression-test discipline, the 85% CI gate.
 
 Per-submodule specs (implementation-level, one file per source module):
