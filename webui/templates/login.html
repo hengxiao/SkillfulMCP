@@ -40,6 +40,14 @@
             <i class="bi bi-box-arrow-in-right me-1"></i>Sign in
           </button>
         </form>
+
+        {% if oidc_enabled %}
+        <div class="text-center text-muted small my-3">— or —</div>
+        <a href="/auth/oidc/login"
+           class="btn btn-outline-secondary w-100">
+          <i class="bi bi-shield-lock me-1"></i>Sign in with SSO
+        </a>
+        {% endif %}
       </div>
     </div>
   </div>

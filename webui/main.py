@@ -30,6 +30,7 @@ Route map (see spec/delivery.md §4 for the authoritative list):
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -52,6 +53,7 @@ from .auth import (
 from .client import MCPClient, MCPError
 from .config import get_settings
 from .middleware import AuthMiddleware, csrf_required, require_role
+from . import oidc as oidc_mod
 
 
 # Shorthand so every mutating route can declare `dependencies=CSRF` and
@@ -141,6 +143,7 @@ def create_app() -> FastAPI:
         return _render(request, "login.html", {
             "error": error,
             "next": next,
+            "oidc_enabled": oidc_mod.is_enabled(),
         })
 
     @app.post("/login")
@@ -181,6 +184,94 @@ def create_app() -> FastAPI:
     async def logout(request: Request):
         clear_session(request)
         return RedirectResponse("/login", status_code=303)
+
+    # ------------------------------------------------------------------ #
+    # OIDC login (item G)                                                  #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/auth/oidc/login")
+    async def oidc_login(request: Request):
+        cfg = oidc_mod.OIDCConfig.from_env()
+        if cfg is None:
+            return _redirect("/login", "OIDC is not configured.", "error")
+        state, nonce = oidc_mod.fresh_state()
+        oidc_mod.stash_state(request, state, nonce)
+        try:
+            url = oidc_mod.build_login_url(cfg, state=state, nonce=nonce)
+        except Exception as exc:
+            return _redirect("/login", f"OIDC discovery failed: {exc}", "error")
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/auth/oidc/callback")
+    async def oidc_callback(
+        request: Request,
+        code: str | None = None,
+        state: str | None = None,
+        error: str | None = None,
+    ):
+        cfg = oidc_mod.OIDCConfig.from_env()
+        if cfg is None:
+            return _redirect("/login", "OIDC is not configured.", "error")
+        if error or not code:
+            return _redirect(
+                "/login",
+                f"OIDC login failed: {error or 'no code'}",
+                "error",
+            )
+        expected_state, nonce = oidc_mod.pop_state(request)
+        if not expected_state or state != expected_state:
+            return _redirect(
+                "/login",
+                "OIDC state mismatch — try again.",
+                "error",
+            )
+        try:
+            claims = oidc_mod.exchange_and_verify(
+                cfg, code=code, nonce=nonce or "",
+            )
+        except oidc_mod.OIDCError as exc:
+            return _redirect(
+                "/login", f"OIDC login failed: {exc}", "error"
+            )
+
+        email = (claims.get("email") or "").strip().lower()
+        if not email:
+            return _redirect(
+                "/login", "OIDC id_token missing email claim.", "error",
+            )
+
+        # Ask the catalog to resolve-or-create the user. Signup
+        # endpoint handles either case: if the email exists we get
+        # 409, which we translate into an authenticate-and-continue
+        # path. If new, we create via signup with a long random
+        # placeholder password (the user can never log in with it —
+        # OIDC is their only path).
+        client = get_client()
+        user_id: str | None = None
+        try:
+            user = await client.signup(
+                email=email,
+                password=secrets.token_urlsafe(32),
+                display_name=claims.get("name") or None,
+            )
+            user_id = user.get("id")
+        except MCPError as exc:
+            if exc.status_code != 409:
+                return _redirect(
+                    "/login", f"OIDC login failed: {exc}", "error",
+                )
+            # Existing user — fine, we just attach the session.
+            user_id = None  # Resolved later if the UI needs it.
+
+        op = Operator(
+            email=email,
+            role="admin",
+            user_id=user_id,
+            is_superadmin=False,
+            active_account_id=None,
+        )
+        set_session_operator(request, op)
+        return RedirectResponse("/", status_code=303)
 
     # ------------------------------------------------------------------ #
     # Dashboard                                                           #

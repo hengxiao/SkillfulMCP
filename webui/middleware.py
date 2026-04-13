@@ -50,6 +50,10 @@ _DEFAULT_AUTH_EXEMPT: frozenset[str] = frozenset({
     "/login",
     "/logout",    # harmless to allow unauth'd; it's a no-op
     "/favicon.ico",
+    # OIDC entry + callback are pre-login by definition; the
+    # callback handler sets the session on success.
+    "/auth/oidc/login",
+    "/auth/oidc/callback",
 })
 
 
