@@ -355,14 +355,32 @@ Public endpoint:
 ```
 POST /signup
   body: {email, password, display_name}
+  - Normalizes the email first: `.strip().lower()`. The reserved-
+    email check runs on the normalized form so variants like
+    `Superadmin@SkillfulMCP.com` or trailing whitespace are
+    blocked as well.
   - Creates a users row, bcrypt-hashes the password.
-  - Refuses if `email == 'superadmin@skillfulmcp.com'` (reserved).
-  - Refuses duplicate emails (existing account offers "Sign in").
+  - Refuses with 400 if the normalized email equals
+    `superadmin@skillfulmcp.com` (reserved).
+  - Refuses duplicate emails with 409 (existing account offers
+    "Sign in").
   - Settings-gated: `MCP_ALLOW_PUBLIC_SIGNUP` (default: false).
-    When false, `/signup` only accepts emails that are listed in
-    at least one pending invitation (§3.5.2). Deployments that
-    want open signup flip the flag.
-  - On success, consumes every `pending_membership` row matching
+    When false, `/signup` accepts only emails listed in at least
+    one pending invitation (§3.5.2), returning 403 otherwise.
+  - **Superadmin bypass.** When the caller is the superadmin
+    (session.is_superadmin), the gate is ignored. The superadmin
+    can mint a regular user row even in an invite-only deployment
+    — this is how a fresh Wave 9 install gets its first real
+    account-admin when no env operators are configured and
+    MCP_ALLOW_PUBLIC_SIGNUP is off. The audit line records
+    `actor_email=superadmin@skillfulmcp.com` so the action is
+    traceable.
+  - Rate-limited per source IP AND per normalized email:
+    `MCP_SIGNUP_PER_IP_PER_MINUTE` (default 10) and
+    `MCP_SIGNUP_PER_EMAIL_PER_MINUTE` (default 3). Exceeding
+    either returns 429. This blocks the "bot probing which emails
+    are in pending_memberships" enumeration pattern.
+  - On success, consumes every `pending_memberships` row matching
     the new user's email: insert the corresponding membership
     rows, delete the pending rows. All in the same transaction.
   - Logs the signup event with `invited_memberships=[...]` for
@@ -370,19 +388,25 @@ POST /signup
 ```
 
 New users with no invitation and no `MCP_ALLOW_PUBLIC_SIGNUP=true`
-cannot land anywhere — the signup endpoint 403s. A landing-page
-banner explains what to do ("ask the account admin to invite you").
+cannot sign up — the endpoint 403s with a friendly error message
+("You need an invitation from an account admin to sign up."). The
+UI surfaces the same text on the signup page so the user doesn't
+have to submit and fail to learn this.
 
 Self-delete:
 
 ```
-DELETE /users/me
+DELETE /users/me    → 204 on success, 409 on last-admin conflict.
   - Removes the caller's user row. Cascades all their memberships.
   - Last-admin guard runs per account: if removing the user's
     account-admin membership would leave an account with zero
-    active admins, the call 409s with a list of the affected
-    accounts. The user must either promote someone else or delete
-    each account first.
+    active admins, the call 409s with a JSON body listing each
+    affected account and its admin count, so the UI can offer a
+    bulk "resolve all blocks" flow (promote another member or
+    delete the whole account, per account). Wave 9 ships this
+    dialog as a single form with one row per blocking account;
+    the client issues the individual mutations before retrying
+    the self-delete.
   - Owned catalog rows follow the membership-removal reassignment
     rule (§3.5.4) per account.
 ```
@@ -427,6 +451,14 @@ then, deployments with sensitive sharing should keep
 `MCP_ALLOW_PUBLIC_SIGNUP=false` (the default) and trust that
 operators are picking email recipients who have not yet registered
 but will.
+
+Concurrency note: the consume-on-signup step runs inside the same
+transaction as the user insert at read-committed isolation (the
+SQLAlchemy default). Races between admin-revoke and user-signup
+on the same pending row are resolved by the order of commit —
+whichever transaction commits first wins. A follow-up admin can
+re-issue a revoked invite if the race went the wrong way. Tests
+cover the "admin revokes while signup is mid-flight" scenario.
 
 Endpoints:
 
@@ -491,8 +523,8 @@ the inheritance path — that's always an explicit operator action.
 
 ### 3.6 Create an account (any logged-in user)
 
-Account creation is **self-service**. Any authenticated user can
-call:
+Account creation is **self-service**. Any authenticated regular
+user can call:
 
 ```
 POST /accounts
@@ -500,8 +532,9 @@ POST /accounts
   - Creates an accounts row with name (unique check).
   - Atomically inserts an account_memberships row for the caller
     with role='account-admin'.
-  - Updates the caller's users.last_active_account_id so their
-    next request lands in the new account.
+  - Updates the caller's users.last_active_account_id AND the
+    session's active_account_id + active_role so the next
+    request lands in the new account without a re-login.
   - Rate-limited: MCP_ACCOUNT_CREATE_PER_USER_PER_DAY (default 5)
     throttles per-user creation to prevent runaway tenant spam.
 ```
@@ -512,9 +545,15 @@ their own account. If a member wants their own separate account,
 they create it themselves and optionally invite their
 collaborators.
 
-The superadmin does not participate in the normal create flow —
-they're oversight, not a tenant creator. They can still call
-`POST /accounts` (any user can), but it's not their primary role.
+**Superadmin cannot call `POST /accounts`.** The endpoint returns
+403 for the superadmin. Rationale: account creation atomically
+inserts an `account-admin` membership for the caller, and the
+superadmin holds no memberships by design (§2.3). Creating an
+empty account would violate the last-admin invariant. Superadmins
+who want to bootstrap a new account in a fresh deployment do so
+by first signing up a regular user via `POST /signup` (which the
+superadmin can bypass-call per §3.5.1), then having that user
+call `POST /accounts`.
 
 ### 3.7 Delete an account
 
@@ -749,13 +788,20 @@ User identity (self-service):
 ```
 POST   /signup                             public; see §3.5.1
   body: {email, password, display_name}
-  - Refuses the reserved superadmin@skillfulmcp.com email.
+  - Refuses the reserved superadmin@skillfulmcp.com email (400).
   - Gated by MCP_ALLOW_PUBLIC_SIGNUP; when false, the email must
-    match at least one pending_memberships row.
+    match at least one pending_memberships row (or the caller
+    must be superadmin, per §3.5.1).
   - Consumes pending memberships into real memberships.
 
-PUT    /users/me                           self; update display_name / password.
-DELETE /users/me                           self; last-admin guarded per §3.5.1.
+PUT    /users/me                           self; update display_name / password. 200.
+DELETE /users/me                           self; last-admin guarded per §3.5.1. 204 on success.
+
+PUT    /users/{id}/disable                 superadmin-only.
+  body: {disabled: bool}
+  - Abuse-moderation handle. Setting disabled=true blocks login
+    and hides the user from membership pickers without removing
+    any rows or memberships.
 ```
 
 Accounts (any authenticated user):
@@ -993,13 +1039,23 @@ users always see their active account's counts.
 Two new top-level pages for the self-service flow:
 
 - `GET /signup` — form with email, password, display_name fields.
-  When `MCP_ALLOW_PUBLIC_SIGNUP=false`, the form pre-validates the
-  email via `GET /signup/invite-check?email=...` and refuses to
-  submit unless at least one pending invitation matches.
-- `GET /accounts/new` — any logged-in user can reach this;
+  No client-side invitation check (that would be an email-
+  enumeration oracle). The form submits to `POST /signup` which
+  returns a friendly 403 on "no matching invitation" — the page
+  renders that error inline. When
+  `MCP_ALLOW_PUBLIC_SIGNUP=false`, the page shows a visible banner
+  at the top of the form:
+  > **This server is invite-only.** Sign up only works for emails
+  > an account admin has already invited. Ask your admin to add
+  > your email before trying to sign up.
+  This sets expectations before submission without revealing
+  whether any specific email is on the pending list.
+
+- `GET /accounts/new` — any logged-in regular user can reach this;
   renders a form with a single "Account name" field and submits to
   `POST /accounts`. On success redirects to the new account's
-  detail page.
+  detail page. Superadmin gets a 403 on the link (they can't
+  POST /accounts per §3.6).
 
 ---
 
@@ -1023,13 +1079,19 @@ tightens rather than loosens the rule.
 
 ## 8. Role-check implementation
 
-Four dependencies:
+Five dependencies:
 
 ```python
+def require_authenticated_user():
+    """Fails 401 unless the session has a logged-in user (either
+    a regular user or the superadmin). Used on endpoints that
+    aren't public but don't need a specific role, e.g.
+    POST /accounts, POST /session/switch-account."""
+
 def require_superadmin():
     """Fails 403 unless session.is_superadmin is True.
-    Used for platform-wide actions like create-account,
-    delete-account, hard-delete-user."""
+    Used for platform-wide actions like disable-user and
+    superadmin-bypass signup."""
 
 def require_membership(path_param: str = "account_id"):
     """Fails 403 unless the caller has a membership in the path
@@ -1154,7 +1216,8 @@ Coverage gate stays at 85%. New code ≈ 1,000 LoC; tests ≈ 700 LoC.
 | Step | Deliverable |
 | ---- | ----------- |
 | 9.0 | Migration `0004_accounts_and_memberships`: create `accounts`, `account_memberships`, and `pending_memberships` tables. Drop `users.role`. Add `users.last_active_account_id` (FK ON DELETE SET NULL to `accounts.id`). Add `users.id != '0'` CHECK. Migrate Wave 8b admins/viewers per §2.4. Env superadmin (`MCP_SUPERADMIN_PASSWORD_HASH`, email hardcoded) required at startup. Service-layer last-admin guard (with `SELECT ... FOR UPDATE`). |
-| 9.1 | `/signup`, `/accounts`, `/accounts/{id}/members`, `/accounts/{id}/pending`, `/users/me` endpoints. `require_superadmin`, `require_membership_role`, `require_authenticated_user` deps + `admin.superadmin_acting` audit logging on writes. Session stores `{user_id, email, is_superadmin, active_account_id, active_role}` (memberships re-fetched per request). `/session/switch-account`. Active-account selection at login per §3.4. Self-heal of stale `active_account_id` on every request. |
+| 9.1a | **Public / authenticated-any routes.** `/signup` (public, rate-limited), `/users/me` (authenticated), `POST /accounts` + `/accounts/new` UI (authenticated regular users only, 403 for superadmin), `/session/switch-account` (authenticated). |
+| 9.1b | **Account-scoped / superadmin routes.** `/accounts/{id}` (GET, DELETE), `/accounts/{id}/members/*`, `/accounts/{id}/pending/*`, `PUT /users/{id}/disable`. `require_superadmin`, `require_membership_role`, `require_authenticated_user` deps. `admin.superadmin_acting` audit logging on writes (with actor_email + target_user_id + resource_id + interesting_fields bag). Session stores `{user_id, email, is_superadmin, active_account_id, active_role}` (memberships re-fetched per request, self-heal on stale). Active-account selection at login per §3.4. |
 | 9.2 | Migration `0005_catalog_account`: `account_id` (NOT NULL) + `owner_user_id` + `owner_email_snapshot` on skills + skillsets + agents. Server-side stamping from `active_account_id` on create. New `visibility='account'` tier (replaces Wave 8a 2-state). Update `can_read` / agent authorization. |
 | 9.3 | Filter GET lists per §4.4 + `?mine` / `?shared` / `?account_id` params. |
 | 9.4 | Migration `0006_shares`: `skill_shares` / `skillset_shares` tables + `/shares` CRUD endpoints. Private + private-with-inert-entry semantics. |
