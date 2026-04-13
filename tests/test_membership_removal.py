@@ -173,7 +173,7 @@ class TestRemovalPreviewEndpoint:
         alice = client.post("/admin/users",
                             json={"email": "alice@x.com", "password": "s3cret-pass"},
                             headers=ADMIN_HEADERS).json()
-        bob = client.post("/admin/users",
+        _ = client.post("/admin/users",
                           json={"email": "bob@x.com", "password": "s3cret-pass"},
                           headers=ADMIN_HEADERS).json()
         a = client.post("/admin/accounts",
@@ -236,7 +236,7 @@ class TestDeleteWithReassignment:
                     headers=ADMIN_HEADERS)
         # Promote a second admin so Alice can leave without
         # tripping the last-admin guard.
-        alice2 = client.post("/admin/users",
+        _ = client.post("/admin/users",
                              json={"email": "al2@x.com", "password": "s3cret-pass"},
                              headers=ADMIN_HEADERS).json()
         client.post(f"/admin/accounts/{a['id']}/members",

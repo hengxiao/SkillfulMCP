@@ -31,11 +31,16 @@ skill_app = typer.Typer(help="Manage skills", no_args_is_help=True)
 agent_app = typer.Typer(help="Manage agents", no_args_is_help=True)
 token_app = typer.Typer(help="Issue JWT tokens", no_args_is_help=True)
 catalog_app = typer.Typer(help="Import/export catalog data", no_args_is_help=True)
+superadmin_app = typer.Typer(
+    help="Platform superadmin operations (password rotation, etc.)",
+    no_args_is_help=True,
+)
 
 app.add_typer(skill_app, name="skill")
 app.add_typer(agent_app, name="agent")
 app.add_typer(token_app, name="token")
 app.add_typer(catalog_app, name="catalog")
+app.add_typer(superadmin_app, name="superadmin")
 
 
 # ---------------------------------------------------------------------------
@@ -225,3 +230,126 @@ def catalog_import(
         f"Import complete: {imported['skillsets']} skillsets, "
         f"{imported['skills']} skills, {imported['agents']} agents."
     )
+
+
+# ---------------------------------------------------------------------------
+# Superadmin rotation (Wave 9.x, item K)
+# ---------------------------------------------------------------------------
+#
+# Per spec §10, rotating the platform superadmin means rotating
+# `MCP_SUPERADMIN_PASSWORD_HASH` + restarting the catalog. This
+# subcommand centralizes the hash-generation step so operators don't
+# have to remember the inline `python -c "..."` snippet, and can
+# optionally write the new value directly to a local `.env` file.
+
+
+@superadmin_app.command("hash-password")
+def superadmin_hash_password(
+    password: Optional[str] = typer.Option(
+        None,
+        "--password",
+        help=(
+            "New superadmin password. When omitted, prompts securely "
+            "(recommended — avoids putting the plaintext in shell history)."
+        ),
+    ),
+):
+    """Generate a bcrypt hash suitable for MCP_SUPERADMIN_PASSWORD_HASH.
+
+    Prints the hash to stdout for the operator to copy into their
+    secrets manager / Kubernetes Secret / .env. Use `--rotate-env` on
+    `superadmin rotate` to edit a local .env in one step.
+    """
+    from mcp_server.pwhash import hash_password as _hash
+
+    if password is None:
+        password = typer.prompt(
+            "New superadmin password", hide_input=True, confirmation_prompt=True
+        )
+    hashed = _hash(password)
+    typer.echo(hashed)
+
+
+@superadmin_app.command("rotate")
+def superadmin_rotate(
+    password: Optional[str] = typer.Option(
+        None,
+        "--password",
+        help="New password. Prompts securely when omitted.",
+    ),
+    env_file: Path = typer.Option(
+        Path(".env"),
+        "--env-file",
+        help="Path to the .env file to rewrite in place.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=(
+            "Print the new hash + the diff against the env file "
+            "without writing to disk."
+        ),
+    ),
+):
+    """Rewrite MCP_SUPERADMIN_PASSWORD_HASH in a local .env file.
+
+    Does NOT signal the running catalog process — you must restart
+    it (or send the new hash to your orchestrator's secret surface)
+    for the rotation to take effect. The spec calls out the restart
+    requirement as intentional friction; see spec §2.3.
+    """
+    from mcp_server.pwhash import hash_password as _hash
+
+    if password is None:
+        password = typer.prompt(
+            "New superadmin password", hide_input=True, confirmation_prompt=True
+        )
+    new_hash = _hash(password)
+
+    if not env_file.exists():
+        typer.echo(
+            f"env file {env_file} does not exist; creating it.",
+            err=True,
+        )
+        existing_lines: list[str] = []
+    else:
+        existing_lines = env_file.read_text().splitlines()
+
+    new_lines: list[str] = []
+    replaced = False
+    for line in existing_lines:
+        if line.startswith("MCP_SUPERADMIN_PASSWORD_HASH="):
+            new_lines.append(f"MCP_SUPERADMIN_PASSWORD_HASH={new_hash}")
+            replaced = True
+        else:
+            new_lines.append(line)
+    if not replaced:
+        new_lines.append(f"MCP_SUPERADMIN_PASSWORD_HASH={new_hash}")
+
+    if dry_run:
+        typer.echo("DRY RUN — no changes written.")
+        typer.echo(f"New hash: {new_hash}")
+        typer.echo(f"Would {'update' if replaced else 'append'} {env_file}")
+        return
+
+    env_file.write_text("\n".join(new_lines) + "\n")
+    action = "updated" if replaced else "appended"
+    typer.echo(f"{action} MCP_SUPERADMIN_PASSWORD_HASH in {env_file}")
+    typer.echo(
+        "Restart the catalog process for the new password to take "
+        "effect. (Docker: `docker compose restart catalog`. Helm: "
+        "rotate the Secret + trigger a rolling restart.)"
+    )
+
+
+@superadmin_app.command("show-email")
+def superadmin_show_email():
+    """Print the hardcoded superadmin pseudo-email.
+
+    Hardcoded to `superadmin@skillfulmcp.com` (spec §2.3). This
+    command exists so ops tooling can look it up without grepping
+    the source.
+    """
+    from mcp_server.users import SUPERADMIN_EMAIL
+
+    typer.echo(SUPERADMIN_EMAIL)
