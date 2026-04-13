@@ -20,7 +20,18 @@ from .middleware import (
 )
 from .ratelimit import TokenBucket
 from .accounts import bootstrap_default_account
-from .routers import admin, agents, bundles, health, skillsets, skills, token, users as users_router
+from .routers import (
+    accounts as accounts_router,
+    admin,
+    agents,
+    bundles,
+    health,
+    signup as signup_router,
+    skills,
+    skillsets,
+    token,
+    users as users_router,
+)
 from .users import bootstrap_from_env
 
 
@@ -112,6 +123,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(skillsets.router)
     app.include_router(admin.router)
     app.include_router(users_router.router)
+    app.include_router(accounts_router.router)
+    app.include_router(signup_router.router)
 
     return app
 

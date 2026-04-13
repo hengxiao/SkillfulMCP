@@ -275,3 +275,123 @@ class AuthenticateResponse(BaseModel):
 class UserAuthenticateRequest(BaseModel):
     email: str
     password: str
+
+
+# ---------------------------------------------------------------------------
+# Account / membership / pending-invitation schemas (Wave 9.1)
+# ---------------------------------------------------------------------------
+
+VALID_MEMBERSHIP_ROLES: frozenset[str] = frozenset(
+    {"account-admin", "contributor", "viewer"}
+)
+
+
+def _validate_membership_role(v: str) -> str:
+    v = (v or "").strip().lower()
+    if v not in VALID_MEMBERSHIP_ROLES:
+        raise ValueError(
+            f"role must be one of {sorted(VALID_MEMBERSHIP_ROLES)}, got {v!r}"
+        )
+    return v
+
+
+class AccountCreateRequest(BaseModel):
+    """Body for `POST /admin/accounts`.
+
+    `initial_admin_user_id` must reference an existing users row. The
+    endpoint atomically adds that user as the first `account-admin`
+    membership.
+    """
+
+    name: str
+    initial_admin_user_id: str
+
+
+class AccountResponse(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MembershipInviteRequest(BaseModel):
+    """Body for `POST /admin/accounts/{id}/members`.
+
+    If `email` resolves to an existing users row, a real membership is
+    created. Otherwise a `pending_memberships` row is inserted and
+    consumed atomically when that email later signs up.
+    """
+
+    email: str
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def _r(cls, v: str) -> str:
+        return _validate_membership_role(v)
+
+
+class MembershipRoleUpdateRequest(BaseModel):
+    role: str
+
+    @field_validator("role")
+    @classmethod
+    def _r(cls, v: str) -> str:
+        return _validate_membership_role(v)
+
+
+class MembershipResponse(BaseModel):
+    """Active membership row as returned by the members listing."""
+
+    user_id: str
+    account_id: str
+    role: str
+    email: str
+    display_name: str | None = None
+    disabled: bool = False
+    created_at: datetime
+    # Distinguishes active rows from `PendingMembershipResponse` in the
+    # combined listing.
+    pending: bool = False
+
+
+class PendingMembershipResponse(BaseModel):
+    id: int
+    email: str
+    account_id: str
+    role: str
+    invited_by_user_id: str | None = None
+    created_at: datetime
+    pending: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class SignupRequest(BaseModel):
+    """Body for `POST /admin/signup` (invoked by the Web UI on behalf
+    of the user submitting the public signup form).
+
+    The Web UI is responsible for rate-limiting + invite gating; the
+    catalog just enforces the reserved-email guard and consumes
+    matching pending invitations atomically.
+    """
+
+    email: str
+    password: str
+    display_name: str | None = None
+
+
+class SignupResponse(BaseModel):
+    id: str
+    email: str
+    display_name: str | None = None
+    # IDs of accounts where a pending invitation was consumed into a
+    # real membership as part of this signup. Empty for a bare signup
+    # with no outstanding invites.
+    consumed_account_ids: list[str] = []
+
+
+class DisableUserRequest(BaseModel):
+    disabled: bool

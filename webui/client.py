@@ -188,6 +188,121 @@ class MCPClient:
     async def delete_user(self, user_id: str) -> None:
         await self._request("DELETE", f"/admin/users/{user_id}")
 
+    # ------------------------------------------------------------------
+    # Accounts + memberships (Wave 9.1)
+    # ------------------------------------------------------------------
+
+    async def list_accounts(self) -> list[dict]:
+        return await self._request("GET", "/admin/accounts")
+
+    async def get_account(self, account_id: str) -> dict:
+        return await self._request("GET", f"/admin/accounts/{account_id}")
+
+    async def create_account(self, name: str, initial_admin_user_id: str) -> dict:
+        return await self._request(
+            "POST",
+            "/admin/accounts",
+            json={
+                "name": name,
+                "initial_admin_user_id": initial_admin_user_id,
+            },
+        )
+
+    async def delete_account(
+        self,
+        account_id: str,
+        *,
+        confirm_user_count: int,
+        confirm_skill_count: int = 0,
+        confirm_skillset_count: int = 0,
+        confirm_agent_count: int = 0,
+        cascade_catalog: bool = False,
+    ) -> None:
+        await self._request(
+            "DELETE",
+            f"/admin/accounts/{account_id}",
+            params={
+                "confirm_user_count": confirm_user_count,
+                "confirm_skill_count": confirm_skill_count,
+                "confirm_skillset_count": confirm_skillset_count,
+                "confirm_agent_count": confirm_agent_count,
+                "cascade_catalog": 1 if cascade_catalog else 0,
+            },
+        )
+
+    async def list_members(self, account_id: str) -> list[dict]:
+        """Combined active + pending list. Rows are tagged by a
+        `pending: bool` field."""
+        return await self._request(
+            "GET", f"/admin/accounts/{account_id}/members"
+        )
+
+    async def invite_member(
+        self, account_id: str, email: str, role: str
+    ) -> dict:
+        return await self._request(
+            "POST",
+            f"/admin/accounts/{account_id}/members",
+            json={"email": email, "role": role},
+        )
+
+    async def update_member_role(
+        self, account_id: str, user_id: str, role: str
+    ) -> dict:
+        return await self._request(
+            "PUT",
+            f"/admin/accounts/{account_id}/members/{user_id}",
+            json={"role": role},
+        )
+
+    async def remove_member(
+        self,
+        account_id: str,
+        user_id: str,
+        *,
+        new_owner_id: str | None = None,
+    ) -> None:
+        params: dict = {}
+        if new_owner_id:
+            params["new_owner_id"] = new_owner_id
+        await self._request(
+            "DELETE",
+            f"/admin/accounts/{account_id}/members/{user_id}",
+            params=params,
+        )
+
+    async def delete_pending_invite(
+        self, account_id: str, pending_id: int
+    ) -> None:
+        await self._request(
+            "DELETE",
+            f"/admin/accounts/{account_id}/pending/{pending_id}",
+        )
+
+    # ------------------------------------------------------------------
+    # Signup + disable (Wave 9.1)
+    # ------------------------------------------------------------------
+
+    async def signup(
+        self, email: str, password: str, display_name: str | None = None
+    ) -> dict:
+        return await self._request(
+            "POST",
+            "/admin/signup",
+            json={
+                "email": email,
+                "password": password,
+                "display_name": display_name,
+            },
+        )
+
+    async def set_user_disabled(self, user_id: str, disabled: bool) -> dict:
+        return await self._request(
+            "PUT",
+            f"/admin/users/{user_id}/disable",
+            json={"disabled": disabled},
+        )
+
     async def authenticate_user(self, email: str, password: str) -> dict | None:
         """Returns the user dict on success, None on 401.
 

@@ -21,6 +21,7 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from .. import accounts as acct_svc
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -28,6 +29,9 @@ from ..models import User
 from ..pwhash import hash_password, verify_password
 from ..schemas import (
     AuthenticateResponse,
+    DisableUserRequest,
+    SignupRequest,
+    SignupResponse,
     UserAuthenticateRequest,
     UserCreate,
     UserResponse,
@@ -113,6 +117,41 @@ def delete_user(
 ):
     if not user_svc.delete_user(db, user_id):
         raise HTTPException(status_code=404, detail="User not found")
+
+
+@router.put("/{user_id}/disable", response_model=UserResponse)
+def disable_user(
+    user_id: str,
+    body: DisableUserRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """Wave 9.1: platform-level abuse moderation.
+
+    `disabled=true` blocks login (authenticate returns 401) and hides
+    the user from membership pickers. The user rows + memberships
+    are preserved so enable-again is a one-call reversal.
+
+    Side effect: disabling a user who is the only active
+    account-admin of some account effectively strands that account
+    behind the last-admin guard. The endpoint does NOT enforce this
+    today — the affected-account list is computed + surfaced by the
+    Web UI when 9.5 builds the disable flow. For now this is a
+    documented footgun for the raw admin-key path.
+    """
+    try:
+        u = user_svc.update_user(db, user_id, disabled=body.disabled)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+    if u is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    _log.info(
+        "user.disabled_flag_changed",
+        extra={"user_id": user_id, "disabled": body.disabled},
+    )
+    return _to_response(u)
 
 
 @router.post("/authenticate", response_model=AuthenticateResponse)
