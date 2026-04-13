@@ -75,13 +75,12 @@ class TestMigrationsSQLite:
         # Create some real loggers to observe state.
         before = logging.getLogger("uvicorn.error")
         before.addHandler(logging.NullHandler())
-        before_disabled = before.disabled
+        assert before.disabled is False  # sanity: baseline state
 
         # Load the migration env module in the same way the catalog's
         # lifespan does. We don't actually run migrations — we just
         # exercise the fileConfig call at import time.
         from alembic.config import Config
-        from alembic import script
 
         cfg = Config(str(ALEMBIC_INI))
         # Creating a ScriptDirectory forces alembic.ini to be parsed but

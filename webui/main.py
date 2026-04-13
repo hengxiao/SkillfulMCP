@@ -1,10 +1,30 @@
 """
 SkillfulMCP Web UI — FastAPI application.
 
-All data flows through MCPClient, which proxies to the MCP server API.
-Forms use standard POST + redirect (PRG) for create/update operations.
-Deletes use HTMX so rows are removed inline without a full page reload.
-Flash messages are passed as ?msg=...&msg_type=success|error query params.
+All data flows through MCPClient, which proxies to the MCP server API
+with the configured admin key. Forms use standard POST + redirect
+(PRG) for create/update operations. Deletes use HTMX so rows are
+removed inline without a full page reload. Flash messages are passed
+as `?msg=...&msg_type=success|error` query params.
+
+Route map (see spec/delivery.md §4 for the authoritative list):
+
+- `/` — public landing, exempt from AuthMiddleware; shows
+  public-visibility skills + skillsets to anonymous visitors and a
+  dashboard-style counts row to logged-in users.
+- `/login`, `/logout` — session-cookie auth; CSRF-protected.
+- `/skillsets`, `/skillsets/{id}[/modal]` + mutations — catalog
+  management + quick-view modal.
+- `/skills`, `/skills/{id}[/modal]`, `/skills/{id}/clone`,
+  `/skills/{id}/new-version` — immutable-version skill workflow +
+  clone-to-rename.
+- `/skills/{id}/versions/{ver}/files/{path:path}` — bundle file
+  download proxy.
+- `/agents`, `/agents/{id}/tokens/new`, `/agents/{id}/tokens` —
+  agent listing + Wave 8c mint-token wizard.
+- `/users`, `/users/new`, `/users/{id}`, `/account` — Wave 8b
+  operator CRUD; role surfaces were removed in Wave 9.0 (account
+  memberships take over in Wave 9.5).
 """
 
 from __future__ import annotations
@@ -16,18 +36,16 @@ from urllib.parse import quote
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .auth import (
-    Operator,
     authenticate,
     authenticate_via_server,
     clear_session,
     get_csrf_token,
     get_session_operator,
-    hash_password,
     set_session_operator,
 )
 from .client import MCPClient, MCPError

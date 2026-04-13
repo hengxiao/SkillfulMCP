@@ -8,7 +8,7 @@ X-Request-ID round-trip on every error class.
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from mcp_server.main import create_app

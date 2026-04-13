@@ -1,16 +1,23 @@
 """
 Operator auth for the Web UI.
 
-Scope (Wave 6a):
-- Password-based local operators, configured via `MCP_WEBUI_OPERATORS`.
-- Bcrypt hashes verified with `passlib`.
-- Operator identity stored in the signed session cookie.
-- CSRF token pattern: per-session token; embedded in forms and in a
+History:
+- Wave 6a — password-based local operators, configured via
+  `MCP_WEBUI_OPERATORS` env (JSON), bcrypt hashes, signed session
+  cookies + per-session CSRF token embedded in forms and the
   `<meta name="csrf-token">` tag so HTMX can include it as a header.
+- Wave 8b — moved the source of truth to the mcp_server `users`
+  table. `authenticate_via_server` is now the primary path;
+  `authenticate` stays as an env-only fallback for disaster recovery.
+- Wave 9.0 — `users.role` dropped from the identity layer (account-
+  scoped roles live on `account_memberships`). Session still carries
+  a `role` field for the Wave-8b-style admin UI gates, always
+  `"admin"` for logged-in users; `is_superadmin` is the new marker
+  for platform-level authority (env-hardcoded superadmin at
+  `superadmin@skillfulmcp.com`).
 
-OIDC and tenant-scoped roles are Wave 6b concerns. The password flow
-exercises the full session / CSRF / auth-middleware pipeline; swapping
-the credential source for OIDC later is a localized change.
+OIDC remains a Wave 6b concern; swapping the credential source later
+is a localized change to `authenticate_via_server`.
 """
 
 from __future__ import annotations

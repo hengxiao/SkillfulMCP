@@ -4,7 +4,6 @@ import io
 import tarfile
 import zipfile
 
-import pytest
 
 from tests.conftest import (
     ADMIN_HEADERS,

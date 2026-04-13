@@ -14,6 +14,14 @@ with the following keys:
   MCP_DATABASE_URL             — e.g. postgresql://user:pass@host/db
   MCP_WEBUI_SESSION_SECRET     — session cookie signing secret
   MCP_WEBUI_OPERATORS          — JSON array of {email, password_hash}
+  MCP_SUPERADMIN_PASSWORD_HASH — Wave 9 platform superadmin password hash.
+                                 Login email is hardcoded to
+                                 `superadmin@skillfulmcp.com`. Generate with:
+                                   python -c "from mcp_server.pwhash \
+                                     import hash_password; \
+                                     print(hash_password('pw'))"
+                                 The catalog pod refuses to start if this
+                                 key is missing or empty.
 
 If you plan to use multi-key JWT rotation, also add MCP_JWT_KEYS +
 MCP_JWT_ACTIVE_KID (see spec/mcp_server/keyring.md).

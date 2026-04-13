@@ -10,7 +10,6 @@ from mcp_server import bundles
 from mcp_server.bundles import (
     BundleError,
     BundleFile,
-    MAX_BUNDLE_BYTES,
     build_targz,
     copy_bundle,
     detect_format,
@@ -213,7 +212,8 @@ class TestStore:
         dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={})
         db_session.add_all([src, dst])
         db_session.commit()
-        db_session.refresh(src); db_session.refresh(dst)
+        db_session.refresh(src)
+        db_session.refresh(dst)
         store_bundle(db_session, src.pk, [BundleFile("new.txt", b"new")])
         store_bundle(db_session, dst.pk, [BundleFile("old.txt", b"old")])
         copy_bundle(db_session, src.pk, dst.pk)

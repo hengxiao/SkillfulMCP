@@ -17,7 +17,6 @@ Role management moved out of this router entirely — there is no
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session

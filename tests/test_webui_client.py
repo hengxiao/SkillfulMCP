@@ -10,7 +10,6 @@ transport layer so every method's real wire behavior is asserted.
 from __future__ import annotations
 
 import json
-from typing import Callable
 
 import httpx
 import pytest

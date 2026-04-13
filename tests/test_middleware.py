@@ -12,8 +12,6 @@ for their own file but are worth pinning:
 
 from __future__ import annotations
 
-import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from mcp_server.main import create_app
@@ -56,17 +54,15 @@ class TestRequestId:
 # ---------------------------------------------------------------------------
 
 class TestRequestSizeLimit:
-    def test_oversize_rejected_with_envelope(self, monkeypatch):
-        # Build an app with a tiny 64-byte cap so we can trip the limit
-        # with a plausible payload instead of generating 101 MB in-test.
-        monkeypatch.setenv("MCP_MAX_REQUEST_BODY_MB", "0")  # not used after override
-        app = create_app(database_url="sqlite:///:memory:")
-
-        # Swap in a tight-cap middleware. We can't reconfigure the
-        # already-built stack, so build a bare app and smoke-test the
-        # class directly.
-        from mcp_server.middleware import RequestSizeLimitMiddleware
+    def test_oversize_rejected_with_envelope(self):
+        # Can't reconfigure the already-built catalog middleware stack,
+        # so build a bare app with a tight cap and smoke-test the
+        # middleware class directly. A 32-byte ceiling lets us trip
+        # the limit with a plausible payload instead of generating
+        # 101 MB in-test.
         from fastapi import FastAPI
+
+        from mcp_server.middleware import RequestSizeLimitMiddleware
 
         tight = FastAPI()
         tight.add_middleware(RequestSizeLimitMiddleware, max_bytes=32)

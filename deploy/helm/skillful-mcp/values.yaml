@@ -4,9 +4,10 @@
 ##   helm install mcp deploy/helm/skillful-mcp -f my-values.yaml
 ##
 ## Secrets (MCP_JWT_SECRET, MCP_ADMIN_KEY, MCP_WEBUI_SESSION_SECRET,
-## operator password hashes, DB credentials) must NEVER be committed in
-## values.yaml. Point `.Values.existingSecret` at an in-cluster Secret
-## managed by External Secrets / SealedSecrets / your cloud's KMS.
+## MCP_SUPERADMIN_PASSWORD_HASH, operator password hashes, DB
+## credentials) must NEVER be committed in values.yaml. Point
+## `.Values.existingSecret` at an in-cluster Secret managed by
+## External Secrets / SealedSecrets / your cloud's KMS.
 
 # ---- Images ----------------------------------------------------------------
 image:
@@ -39,9 +40,11 @@ config:
 # ---- Secret reference ------------------------------------------------------
 # Name of a Kubernetes Secret that holds the sensitive values. Required
 # keys depend on what components are enabled:
-#   catalog:  MCP_JWT_SECRET, MCP_ADMIN_KEY, (MCP_DATABASE_URL if external)
+#   catalog:  MCP_JWT_SECRET, MCP_ADMIN_KEY, MCP_SUPERADMIN_PASSWORD_HASH,
+#             (MCP_DATABASE_URL if external)
 #   webui:    MCP_ADMIN_KEY, MCP_WEBUI_SESSION_SECRET, MCP_WEBUI_OPERATORS
 # The chart does NOT create this Secret — operators manage it out-of-band.
+# See templates/NOTES.txt for the full key list with generation snippets.
 existingSecret: "skillful-mcp-secrets"
 
 # ---- Catalog ---------------------------------------------------------------

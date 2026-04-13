@@ -13,12 +13,11 @@ from fastapi.testclient import TestClient
 from jose import jwt
 
 from mcp_server.auth import (
-    TokenService,
     get_default_service,
     reset_default_service,
 )
 from mcp_server.config import get_settings
-from mcp_server.keyring import KeyRing, build_keyring
+from mcp_server.keyring import build_keyring
 from mcp_server.main import create_app
 from mcp_server.revocation import RevocationList
 

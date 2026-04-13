@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import io
 import tarfile
-import zipfile
 
 import boto3
 import pytest

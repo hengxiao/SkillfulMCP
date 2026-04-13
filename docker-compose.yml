@@ -39,6 +39,14 @@ services:
       MCP_DATABASE_URL: "postgresql://mcp:mcp@postgres:5432/mcp"
       MCP_MAX_TOKEN_LIFETIME_SECONDS: "3600"
       MCP_LOG_LEVEL: "INFO"
+      # Wave 9: required — catalog refuses to start otherwise.
+      # Bcrypt hash of the dev superadmin password "superadmin-dev-pw".
+      # Rotate before shipping. Generate a new one with:
+      #   docker run --rm skillful-mcp/catalog:dev \
+      #     python -c "from mcp_server.pwhash import hash_password; \
+      #                print(hash_password('your-password'))"
+      # The $$ escapes $ for docker-compose variable interpolation.
+      MCP_SUPERADMIN_PASSWORD_HASH: "$$2b$$12$$usSAgmWuF3TEMsQhUbgZ/OKs4oHmRm7JuIvuamrmtkGu56QddrWJm"
     depends_on:
       postgres:
         condition: service_healthy

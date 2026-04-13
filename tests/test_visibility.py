@@ -24,8 +24,6 @@ from tests.conftest import (
     bearer,
     get_token,
     make_agent,
-    make_skill,
-    make_skillset,
 )
 
 

@@ -20,7 +20,6 @@ Runs against in-memory SQLite catalog; no S3, no Postgres.
 from __future__ import annotations
 
 import io
-import re
 import zipfile
 
 import httpx

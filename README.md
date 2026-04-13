@@ -160,11 +160,12 @@ make env                   # copies .env.example → .env
 | `MCP_ADMIN_KEY` | Static `X-Admin-Key` header for catalog write endpoints. |
 | `MCP_WEBUI_SESSION_SECRET` | Signing secret for the Web UI session cookie (required when running the Web UI). |
 | `MCP_WEBUI_OPERATORS` | JSON list of `{email, password_hash}` entries — **bootstrap only**. On first boot the `users` table is seeded from this list; after that, operator management happens in the Web UI `/users` pages. |
+| `MCP_SUPERADMIN_PASSWORD_HASH` | Wave 9: bcrypt hash of the platform superadmin password. The email is hardcoded to `superadmin@skillfulmcp.com`. **The catalog process refuses to start if this is missing or empty.** |
 
 Generate a bcrypt hash with:
 
 ```bash
-python -c "from webui.auth import hash_password; print(hash_password('your-password'))"
+python -c "from mcp_server.pwhash import hash_password; print(hash_password('your-password'))"
 ```
 
 **Common overrides**:

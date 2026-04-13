@@ -24,8 +24,6 @@ import zipfile
 import pytest
 
 from mcp_server.bundles import (
-    MAX_BUNDLE_BYTES,
-    MAX_FILE_COUNT,
     BundleError,
     extract_archive,
 )

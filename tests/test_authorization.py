@@ -1,6 +1,5 @@
 """Tests for the authorization engine (mcp_server.authorization)."""
 
-import pytest
 
 from mcp_server.authorization import resolve_allowed_skill_ids
 from mcp_server.catalog import (

@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from fastapi import Request
-from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
-from mcp_server.main import create_app
 
 
 class TestLivenessProbes:

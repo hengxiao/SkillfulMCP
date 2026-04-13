@@ -9,7 +9,6 @@ accidentally unlock accounts.
 from __future__ import annotations
 
 import bcrypt
-import pytest
 
 from mcp_server.pwhash import _encode, _MAX_PASSWORD_BYTES, hash_password, verify_password
 

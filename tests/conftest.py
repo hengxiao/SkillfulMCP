@@ -60,8 +60,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from mcp_server.auth import reset_default_service
-from mcp_server.config import get_settings
-from mcp_server.database import init_db
 from mcp_server.main import create_app
 from mcp_server.models import Base
 

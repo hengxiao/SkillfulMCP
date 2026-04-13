@@ -13,8 +13,6 @@ the session-cookie + CSRF state precisely.
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from unittest.mock import AsyncMock
 

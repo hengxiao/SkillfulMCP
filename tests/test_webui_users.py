@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import webui.main as webui_main
-from webui.auth import Operator, SESSION_KEY_OPERATOR, SESSION_KEY_CSRF
+from webui.auth import Operator
 from webui.main import create_app
 
 from tests.conftest import TEST_OPERATOR_EMAIL

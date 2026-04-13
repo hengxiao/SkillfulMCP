@@ -1,6 +1,5 @@
 """Integration tests for the /skills API endpoints."""
 
-import pytest
 
 from tests.conftest import (
     ADMIN_HEADERS,
