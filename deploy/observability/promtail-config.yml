@@ -1,0 +1,48 @@
+# Promtail discovers the catalog + webui containers, reads their
+# JSON stdout logs off the Docker socket, and ships to Loki with
+# labels that make the request_id / action / level fields queryable
+# in Grafana.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=promtail"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels: ['__meta_docker_container_label_service']
+        target_label: service
+    pipeline_stages:
+      # The app emits one JSON object per line on stdout. Parse it
+      # so Loki sees `level`, `request_id`, and any extra fields as
+      # structured metadata.
+      - json:
+          expressions:
+            ts: ts
+            level: level
+            logger: logger
+            msg: msg
+            request_id: request_id
+            action: action
+      - labels:
+          level:
+          logger:
+          action:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano

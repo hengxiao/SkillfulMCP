@@ -75,10 +75,19 @@ class JSONFormatter(logging.Formatter):
 _CONFIGURED = False
 
 
-def configure_logging(level: str | int | None = None) -> None:
-    """Install the JSON formatter on the root logger. Idempotent."""
+def configure_logging(
+    level: str | int | None = None, *, force: bool = False
+) -> None:
+    """Install the JSON formatter on the root logger.
+
+    Idempotent by default: calling it a second time after successful
+    configuration is a no-op. `force=True` bypasses the idempotency
+    guard and reinstalls the handlers — used by `migrations/env.py`
+    to recover after alembic's ``fileConfig()`` replaces root
+    handlers with its own text-format console logger.
+    """
     global _CONFIGURED
-    if _CONFIGURED:
+    if _CONFIGURED and not force:
         return
 
     lvl = level or os.environ.get("MCP_LOG_LEVEL", "INFO")

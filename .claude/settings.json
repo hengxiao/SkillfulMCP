@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(docker compose:*)",
+      "Bash(docker-compose version:*)",
+      "Read(//usr/libexec/docker/cli-plugins/**)"
+    ]
+  }
+}

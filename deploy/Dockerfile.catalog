@@ -40,11 +40,14 @@ COPY cli/ cli/
 COPY migrations/ migrations/
 COPY alembic.ini ./
 
-# Install the package + postgres driver into a local venv so the runtime
-# image can just copy it wholesale (no pip needed at runtime).
+# Install the package + postgres driver + S3 bundle store into a local
+# venv so the runtime image can just copy it wholesale. `[s3]` is
+# always bundled: the driver is lazy-imported only when
+# MCP_BUNDLE_STORE=s3, and having it available means operators can
+# flip to S3 at deploy time without rebuilding the image.
 RUN python -m venv /venv \
  && /venv/bin/pip install --upgrade pip \
- && /venv/bin/pip install ".[postgres]"
+ && /venv/bin/pip install ".[postgres,s3]"
 
 # -----------------------------------------------------------------------------
 # Stage 2 — runtime

@@ -32,6 +32,22 @@ if config.config_file_name is not None:
     # worker exits with code 1 right after the migration succeeds.
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 
+    # fileConfig ALSO replaces the root logger's handlers with the
+    # `console` handler declared in alembic.ini, which uses a plain
+    # `INFO  [logger] msg` formatter. That works fine for standalone
+    # `alembic upgrade head` runs, but when the catalog lifespan
+    # triggers migrations the replacement clobbers the JSON formatter
+    # our `configure_logging()` just set up — and from that point on
+    # every log line from the running worker emits in text form
+    # instead of the structured JSON that log aggregators parse.
+    #
+    # Re-install the JSON handler on root after fileConfig. Safe to
+    # call unconditionally: under a bare `alembic ...` CLI invocation
+    # (no app lifespan in play), configure_logging() sets up the same
+    # JSON format, which is better than the alembic.ini default.
+    from mcp_server.logging_config import configure_logging
+    configure_logging(force=True)
+
 
 def _resolve_url() -> str:
     x_args = context.get_x_argument(as_dictionary=True)

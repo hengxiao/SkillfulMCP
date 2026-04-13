@@ -32,7 +32,7 @@ Idempotent insert into `skill_skillsets`. Used by `create_skill` and
 2. Build `Skill` row with `is_latest=False`, flush.
 3. On `IntegrityError` (duplicate `(id, version)`) rollback + raise
    `ValueError` that the router converts to 409.
-4. Create `SkillSkillset` association rows for each skillset id.
+4. Create `SkillSkillset` association rows for each skillset id. q
 5. `_refresh_is_latest(data.id)` → commit → refresh → return.
 
 ### `upsert_skill(db, skill_id, name, description, version, metadata) -> Skill`

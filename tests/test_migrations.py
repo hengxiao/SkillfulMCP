@@ -109,6 +109,60 @@ class TestMigrationsSQLite:
             "Check the fileConfig call has disable_existing_loggers=False."
         )
 
+    def test_env_py_reinstalls_json_formatter_after_fileconfig(self):
+        """Regression for the Loki smoke test that surfaced this bug:
+        alembic.ini declares a `console` handler on the root logger
+        with a plain text formatter (``INFO  [name] msg``). When the
+        catalog app's lifespan runs migrations, the fileConfig call
+        replaces the JSONFormatter our `configure_logging()` just
+        installed with the alembic text formatter, so every log line
+        from the running worker emits as text instead of JSON from
+        that point on.
+
+        The fix in migrations/env.py re-calls
+        `configure_logging(force=True)` right after fileConfig. Pin
+        that here so a future edit can't silently re-clobber the
+        formatter."""
+        import logging
+
+        from mcp_server.logging_config import JSONFormatter, configure_logging
+
+        configure_logging(force=True)
+        # Ensure the JSON formatter is the active root formatter BEFORE.
+        assert any(
+            isinstance(h.formatter, JSONFormatter)
+            for h in logging.root.handlers
+        )
+
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(ALEMBIC_INI))
+        import os
+
+        old = os.environ.get("MCP_DATABASE_URL")
+        os.environ["MCP_DATABASE_URL"] = "sqlite:///:memory:"
+        try:
+            command.history(cfg)
+        finally:
+            if old is None:
+                os.environ.pop("MCP_DATABASE_URL", None)
+            else:
+                os.environ["MCP_DATABASE_URL"] = old
+
+        # The JSON formatter must still be on root. A regression in
+        # env.py (e.g. removing the force=True re-install) would
+        # swap in the alembic.ini `generic` formatter and this
+        # assertion would fail.
+        assert any(
+            isinstance(h.formatter, JSONFormatter)
+            for h in logging.root.handlers
+        ), (
+            "migrations/env.py's fileConfig() replaced root handlers "
+            "without re-installing the JSON formatter. Container log "
+            "output will no longer be structured JSON."
+        )
+
     def test_upgrade_head_builds_expected_schema(self, tmp_path):
         """After `alembic upgrade head`, every model table exists with
         the columns declared in `Base.metadata`."""
