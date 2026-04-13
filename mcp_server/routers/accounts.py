@@ -27,8 +27,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+import os
+
 from .. import accounts as acct_svc
 from .. import audit as audit_svc
+from .. import mailer as mailer_mod
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -314,6 +317,23 @@ def invite_member(
         target_kind="email",
         target_id=p.email,
         diff={"role": body.role, "pending_id": p.id},
+    )
+    # Wave 9.4 / item F: fire an invitation email if SMTP is
+    # configured. NullMailer no-ops when it isn't, so the
+    # copy-link fallback stays viable in dev + on-prem deployments
+    # without SMTP access. The signup URL points at the Web UI
+    # (MCP_WEBUI_PUBLIC_URL); falling back to a relative path if
+    # unset so the email is still recognizable.
+    acct = acct_svc.get_account(db, account_id)
+    signup_url = (
+        os.environ.get("MCP_WEBUI_PUBLIC_URL", "").rstrip("/") or ""
+    ) + "/signup"
+    mailer_mod.send_invite(
+        to=p.email,
+        account_name=acct.name if acct else account_id,
+        role=body.role,
+        inviter="an account admin",
+        signup_url=signup_url,
     )
     return _pending_to_response(p).model_dump()
 

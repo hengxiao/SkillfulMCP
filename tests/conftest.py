@@ -79,6 +79,18 @@ def _reset_auth_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_mailer():
+    """Wave 9 item F: every test starts with a fresh NullMailer so
+    in-memory assertions about send_invite() don't leak across
+    cases."""
+    from mcp_server.mailer import NullMailer, reset_default_mailer, set_default_mailer
+    reset_default_mailer()
+    set_default_mailer(NullMailer())
+    yield
+    reset_default_mailer()
+
+
+@pytest.fixture(autouse=True)
 def _reset_bundle_store():
     """Clear the module-level default BundleStore between tests so that
     a test that switches to MCP_BUNDLE_STORE=s3 doesn't poison later
