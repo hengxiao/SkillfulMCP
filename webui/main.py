@@ -221,11 +221,13 @@ def create_app() -> FastAPI:
         id: Annotated[str, Form()],
         name: Annotated[str, Form()],
         description: Annotated[str, Form()] = "",
+        visibility: Annotated[str, Form()] = "private",
     ):
         try:
-            await get_client().create_skillset(
-                {"id": id, "name": name, "description": description}
-            )
+            await get_client().create_skillset({
+                "id": id, "name": name, "description": description,
+                "visibility": visibility,
+            })
             return _redirect("/skillsets", f"Skillset '{id}' created.")
         except MCPError as exc:
             return _redirect("/skillsets", str(exc), "error")
@@ -265,11 +267,13 @@ def create_app() -> FastAPI:
         skillset_id: str,
         name: Annotated[str, Form()],
         description: Annotated[str, Form()] = "",
+        visibility: Annotated[str, Form()] = "private",
     ):
         try:
-            await get_client().update_skillset(
-                skillset_id, {"id": skillset_id, "name": name, "description": description}
-            )
+            await get_client().update_skillset(skillset_id, {
+                "id": skillset_id, "name": name, "description": description,
+                "visibility": visibility,
+            })
             return _redirect(f"/skillsets/{skillset_id}", "Skillset updated.")
         except MCPError as exc:
             return _redirect(f"/skillsets/{skillset_id}", str(exc), "error")
@@ -366,6 +370,7 @@ def create_app() -> FastAPI:
         description: Annotated[str, Form()] = "",
         metadata: Annotated[str, Form()] = "{}",
         skillset_ids: Annotated[list[str], Form()] = [],
+        visibility: Annotated[str, Form()] = "private",
     ):
         try:
             meta = json.loads(metadata)
@@ -374,7 +379,9 @@ def create_app() -> FastAPI:
         try:
             await get_client().create_skill({
                 "id": id, "name": name, "description": description,
-                "version": version, "metadata": meta, "skillset_ids": skillset_ids,
+                "version": version, "metadata": meta,
+                "skillset_ids": skillset_ids,
+                "visibility": visibility,
             })
             return _redirect("/skills", f"Skill '{id}' v{version} created.")
         except MCPError as exc:
@@ -474,6 +481,7 @@ def create_app() -> FastAPI:
         bundle_action: Annotated[str, Form()],
         description: Annotated[str, Form()] = "",
         metadata: Annotated[str, Form()] = "{}",
+        visibility: Annotated[str, Form()] = "private",
         file: UploadFile | None = File(default=None),
     ):
         back = f"/skills/{skill_id}/clone?from={from_version}"
@@ -492,6 +500,7 @@ def create_app() -> FastAPI:
                 "version": version,
                 "metadata": meta,
                 "skillset_ids": [],
+                "visibility": visibility,
             })
         except MCPError as exc:
             return _redirect(back, str(exc), "error")
@@ -576,6 +585,7 @@ def create_app() -> FastAPI:
         bundle_action: Annotated[str, Form()],  # 'copy' | 'upload' | 'none'
         description: Annotated[str, Form()] = "",
         metadata: Annotated[str, Form()] = "{}",
+        visibility: Annotated[str, Form()] = "private",
         file: UploadFile | None = File(default=None),
     ):
         back = f"/skills/{skill_id}/new-version?from={from_version}"
@@ -600,6 +610,7 @@ def create_app() -> FastAPI:
                 "version": version,
                 "metadata": meta,
                 "skillset_ids": [],
+                "visibility": visibility,
             })
         except MCPError as exc:
             return _redirect(back, str(exc), "error")

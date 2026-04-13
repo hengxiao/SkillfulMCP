@@ -27,6 +27,7 @@ def _skill_to_response(skill: Skill) -> SkillResponse:
         version=skill.version,
         is_latest=skill.is_latest,
         metadata=skill.metadata_ or {},
+        visibility=skill.visibility,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )

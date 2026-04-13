@@ -51,6 +51,7 @@ def create_skill(db: Session, data: SkillCreate) -> Skill:
         version=data.version,
         metadata_=data.metadata,
         is_latest=False,
+        visibility=getattr(data, "visibility", "private"),
     )
     db.add(skill)
     try:
@@ -77,6 +78,7 @@ def upsert_skill(
     description: str,
     version: str,
     metadata: dict,
+    visibility: str = "private",
 ) -> Skill:
     """Replace an existing skill version or create it if absent."""
     existing = (
@@ -88,6 +90,7 @@ def upsert_skill(
         existing.name = name
         existing.description = description
         existing.metadata_ = metadata
+        existing.visibility = visibility
         db.flush()
         _refresh_is_latest(db, skill_id)
         db.commit()
@@ -101,6 +104,7 @@ def upsert_skill(
         version=version,
         metadata_=metadata,
         is_latest=False,
+        visibility=visibility,
     )
     db.add(skill)
     db.flush()
@@ -198,7 +202,12 @@ def list_skills_for_agent(
 # ---------------------------------------------------------------------------
 
 def create_skillset(db: Session, data: SkillsetCreate) -> Skillset:
-    ss = Skillset(id=data.id, name=data.name, description=data.description)
+    ss = Skillset(
+        id=data.id,
+        name=data.name,
+        description=data.description,
+        visibility=getattr(data, "visibility", "private"),
+    )
     db.add(ss)
     try:
         db.flush()
@@ -212,13 +221,20 @@ def create_skillset(db: Session, data: SkillsetCreate) -> Skillset:
 
 def upsert_skillset(db: Session, skillset_id: str, data: SkillsetCreate) -> Skillset:
     existing = db.get(Skillset, skillset_id)
+    visibility = getattr(data, "visibility", "private")
     if existing:
         existing.name = data.name
         existing.description = data.description
+        existing.visibility = visibility
         db.commit()
         db.refresh(existing)
         return existing
-    ss = Skillset(id=skillset_id, name=data.name, description=data.description)
+    ss = Skillset(
+        id=skillset_id,
+        name=data.name,
+        description=data.description,
+        visibility=visibility,
+    )
     db.add(ss)
     db.commit()
     db.refresh(ss)

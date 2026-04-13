@@ -199,6 +199,7 @@ class TestNewVersionPost:
             "version": "2.0.0",
             "metadata": {},
             "skillset_ids": [],
+            "visibility": "private",
         }
         # Bundle copied with same skill id on both sides.
         fake.copy_bundle.assert_awaited_once_with("pdf", "2.0.0", "pdf", "1.0.0")

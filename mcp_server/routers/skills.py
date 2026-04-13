@@ -27,6 +27,7 @@ def _to_response(skill: Skill) -> SkillResponse:
         version=skill.version,
         is_latest=skill.is_latest,
         metadata=skill.metadata_ or {},
+        visibility=skill.visibility,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )
@@ -119,6 +120,7 @@ def upsert_skill_endpoint(
         description=data.description,
         version=data.version,
         metadata=data.metadata,
+        visibility=data.visibility,
     )
     return _to_response(skill)
 

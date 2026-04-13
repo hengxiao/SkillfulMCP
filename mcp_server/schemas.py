@@ -6,10 +6,21 @@ import semver
 
 VALID_SCOPES: frozenset[str] = frozenset({"read", "execute"})
 
+# Wave 8a — visibility flag values
+VALID_VISIBILITY: frozenset[str] = frozenset({"public", "private"})
+
 
 # ---------------------------------------------------------------------------
 # Skill schemas
 # ---------------------------------------------------------------------------
+
+def _validate_visibility(v: str) -> str:
+    if v not in VALID_VISIBILITY:
+        raise ValueError(
+            f"visibility must be one of {sorted(VALID_VISIBILITY)}, got {v!r}"
+        )
+    return v
+
 
 class SkillCreate(BaseModel):
     id: str
@@ -18,6 +29,9 @@ class SkillCreate(BaseModel):
     version: str
     metadata: dict[str, Any] = {}
     skillset_ids: list[str] = []
+    # Wave 8a — defaults to private so callers that don't know about
+    # this field continue to behave as before.
+    visibility: str = "private"
 
     @field_validator("version")
     @classmethod
@@ -35,6 +49,11 @@ class SkillCreate(BaseModel):
             raise ValueError("metadata must be a JSON object (dict)")
         return v
 
+    @field_validator("visibility")
+    @classmethod
+    def _v(cls, v: str) -> str:
+        return _validate_visibility(v)
+
 
 class SkillUpsertBody(BaseModel):
     """Body for PUT /skills/{skill_id} — id comes from the path."""
@@ -42,6 +61,7 @@ class SkillUpsertBody(BaseModel):
     description: str = ""
     version: str
     metadata: dict[str, Any] = {}
+    visibility: str = "private"
 
     @field_validator("version")
     @classmethod
@@ -52,6 +72,11 @@ class SkillUpsertBody(BaseModel):
             raise ValueError(f"Invalid semver version: {v!r}.")
         return v
 
+    @field_validator("visibility")
+    @classmethod
+    def _v(cls, v: str) -> str:
+        return _validate_visibility(v)
+
 
 class SkillResponse(BaseModel):
     id: str
@@ -60,6 +85,7 @@ class SkillResponse(BaseModel):
     version: str
     is_latest: bool
     metadata: dict[str, Any]
+    visibility: str
     created_at: datetime
     updated_at: datetime
 
@@ -95,12 +121,19 @@ class SkillsetCreate(BaseModel):
     id: str
     name: str
     description: str = ""
+    visibility: str = "private"
+
+    @field_validator("visibility")
+    @classmethod
+    def _v(cls, v: str) -> str:
+        return _validate_visibility(v)
 
 
 class SkillsetResponse(BaseModel):
     id: str
     name: str
     description: str
+    visibility: str
     created_at: datetime
     updated_at: datetime
 

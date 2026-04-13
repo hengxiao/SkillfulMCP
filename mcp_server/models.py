@@ -30,6 +30,12 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(String, default="")
     version: Mapped[str] = mapped_column(String, nullable=False)
     is_latest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Wave 8a: visibility = 'public' makes the skill listable to any
+    # authenticated agent regardless of grants. Default 'private' is
+    # backwards-compatible with every pre-Wave-8 deployment.
+    visibility: Mapped[str] = mapped_column(
+        String, nullable=False, default="private", server_default="private"
+    )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=True
     )
@@ -71,6 +77,11 @@ class Skillset(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(String, default="")
+    # Wave 8a: 'public' skillset exposes ALL its members to any
+    # authenticated agent, regardless of each member skill's own flag.
+    visibility: Mapped[str] = mapped_column(
+        String, nullable=False, default="private", server_default="private"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

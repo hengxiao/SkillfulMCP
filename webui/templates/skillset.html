@@ -37,6 +37,22 @@
             <label class="form-label fw-semibold">Description</label>
             <textarea name="description" class="form-control" rows="3">{{ skillset.description or '' }}</textarea>
           </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Visibility</label>
+            <div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="visibility" id="ssvis-private-edit"
+                       value="private" {% if skillset.visibility != 'public' %}checked{% endif %}>
+                <label class="form-check-label" for="ssvis-private-edit"><i class="bi bi-lock me-1"></i>Private</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="visibility" id="ssvis-public-edit"
+                       value="public" {% if skillset.visibility == 'public' %}checked{% endif %}>
+                <label class="form-check-label" for="ssvis-public-edit"><i class="bi bi-globe me-1"></i>Public</label>
+              </div>
+            </div>
+            <div class="form-text">Public skillsets expose ALL their member skills to any authenticated agent.</div>
+          </div>
           <button type="submit" class="btn btn-primary w-100">
             <i class="bi bi-save me-1"></i>Save Changes
           </button>

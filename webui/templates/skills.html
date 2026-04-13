@@ -66,6 +66,7 @@
         <tr>
           <th>ID</th>
           <th>Name</th>
+          <th>Visibility</th>
           <th>Latest Version</th>
           <th>Description</th>
           <th>Skillsets</th>
@@ -86,6 +87,17 @@
             data-bs-target="#detail-modal">
           <td><code class="text-success">{{ skill.id }}</code></td>
           <td class="fw-semibold">{{ skill.name }}</td>
+          <td>
+            {% if skill.visibility == 'public' %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle">
+              <i class="bi bi-globe me-1"></i>public
+            </span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">
+              <i class="bi bi-lock me-1"></i>private
+            </span>
+            {% endif %}
+          </td>
           <td>
             <span class="badge bg-success badge-mono">{{ skill.version }}</span>
           </td>
@@ -156,6 +168,22 @@
         <div class="col-md-4">
           <label class="form-label fw-semibold">Description</label>
           <input type="text" name="description" class="form-control" placeholder="Short description (optional)">
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-md-12">
+          <label class="form-label fw-semibold">Visibility</label>
+          <div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="visibility" id="vis-private-new" value="private" checked>
+              <label class="form-check-label" for="vis-private-new"><i class="bi bi-lock me-1"></i>Private — only granted agents see this skill</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="visibility" id="vis-public-new" value="public">
+              <label class="form-check-label" for="vis-public-new"><i class="bi bi-globe me-1"></i>Public — visible to every authenticated agent</label>
+            </div>
+          </div>
         </div>
       </div>
 

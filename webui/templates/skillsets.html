@@ -16,6 +16,7 @@
         <tr>
           <th>ID</th>
           <th>Name</th>
+          <th>Visibility</th>
           <th>Description</th>
           <th>Created</th>
           <th class="text-end">Actions</th>
@@ -32,6 +33,17 @@
             data-bs-target="#detail-modal">
           <td><code class="text-primary">{{ ss.id }}</code></td>
           <td class="fw-semibold">{{ ss.name }}</td>
+          <td>
+            {% if ss.visibility == 'public' %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle">
+              <i class="bi bi-globe me-1"></i>public
+            </span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">
+              <i class="bi bi-lock me-1"></i>private
+            </span>
+            {% endif %}
+          </td>
           <td class="text-muted small">{{ ss.description or '—' }}</td>
           <td class="text-muted small">{{ ss.created_at[:10] if ss.created_at else '—' }}</td>
           <td class="text-end" onclick="event.stopPropagation()">
@@ -79,12 +91,25 @@
         <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
         <input type="text" name="name" class="form-control" placeholder="e.g. Sales Assistant" required>
       </div>
-      <div class="col-md-4">
+      <div class="col-md-3">
         <label class="form-label fw-semibold">Description</label>
         <input type="text" name="description" class="form-control" placeholder="Short description (optional)">
       </div>
-      <div class="col-md-2 d-flex align-items-end">
-        <button type="submit" class="btn btn-primary w-100">
+      <div class="col-md-3 d-flex flex-column justify-content-end">
+        <label class="form-label fw-semibold mb-1">Visibility</label>
+        <div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="visibility" id="ssvis-private" value="private" checked>
+            <label class="form-check-label small" for="ssvis-private">private</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="visibility" id="ssvis-public" value="public">
+            <label class="form-check-label small" for="ssvis-public">public</label>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-12 mt-2">
+        <button type="submit" class="btn btn-primary">
           <i class="bi bi-plus-lg me-1"></i>Create
         </button>
       </div>
