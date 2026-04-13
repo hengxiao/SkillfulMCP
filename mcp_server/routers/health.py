@@ -34,6 +34,23 @@ def livez():
     return {"status": "alive"}
 
 
+@router.get("/.well-known/jwks.json")
+def jwks():
+    """Public JWK set (Wave 9 item I).
+
+    When asymmetric signing is configured
+    (`MCP_JWT_PRIVATE_KEY_PEM` or `*_FILE`), external verifiers
+    fetch this endpoint to validate tokens without a shared secret.
+    Symmetric-mode deployments return an empty key set — their
+    tokens are verified in-process with the same secret.
+    """
+    from ..auth import get_default_service
+    from ..keyring import public_jwks
+
+    ring = get_default_service().keyring
+    return public_jwks(ring)
+
+
 @router.get("/readyz")
 def readyz(request: Request, db: Session = Depends(get_db)):
     """

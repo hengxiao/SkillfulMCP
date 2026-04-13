@@ -8,6 +8,13 @@ class Settings:
     jwt_active_kid: str
     jwt_issuer: str
     jwt_algorithm: str
+    # Wave 9 item I — optional asymmetric signing. When
+    # `jwt_private_key_pem` is set, the keyring signs with RS256 (or
+    # ES256 via `jwt_algorithm`) and /.well-known/jwks.json exposes
+    # the public JWK set for external verifiers.
+    jwt_private_key_pem: str
+    jwt_public_key_pem: str
+    jwt_asymmetric_kid: str
     max_token_lifetime_seconds: int
     admin_key: str
     database_url: str
@@ -20,14 +27,33 @@ class Settings:
     bundle_s3_endpoint_url: str
 
     def __init__(self) -> None:
-        # Either the legacy single-secret OR a multi-key JSON blob must be
-        # present. keyring.build_keyring() will pick the right mode.
+        # Wave 9 item I — asymmetric signing. When a private-key PEM
+        # is configured, it takes precedence over the HMAC modes and
+        # the JWKS endpoint exposes the paired public key.
+        private_pem = _load_pem(
+            inline_env="MCP_JWT_PRIVATE_KEY_PEM",
+            file_env="MCP_JWT_PRIVATE_KEY_FILE",
+        )
+        public_pem = _load_pem(
+            inline_env="MCP_JWT_PUBLIC_KEY_PEM",
+            file_env="MCP_JWT_PUBLIC_KEY_FILE",
+        )
+        self.jwt_private_key_pem = private_pem
+        self.jwt_public_key_pem = public_pem
+        self.jwt_asymmetric_kid = os.environ.get(
+            "MCP_JWT_ASYMMETRIC_KID", "primary-rsa"
+        )
+
+        # Either an asymmetric private key OR a symmetric secret/
+        # keyring must be present.
         secret = os.environ.get("MCP_JWT_SECRET", "")
         keys_raw = os.environ.get("MCP_JWT_KEYS", "").strip()
-        if not secret and not keys_raw:
+        if not private_pem and not secret and not keys_raw:
             raise RuntimeError(
-                "Either MCP_JWT_SECRET or MCP_JWT_KEYS must be set. "
-                "Copy .env.example to .env and set a strong secret."
+                "Either MCP_JWT_SECRET, MCP_JWT_KEYS, or "
+                "MCP_JWT_PRIVATE_KEY_PEM/MCP_JWT_PRIVATE_KEY_FILE must "
+                "be set. Copy .env.example to .env and set a strong "
+                "secret."
             )
         self.jwt_secret = secret
         self.jwt_keys_raw = keys_raw
@@ -69,6 +95,25 @@ class Settings:
         self.bundle_s3_region = os.environ.get("MCP_BUNDLE_S3_REGION", "")
         # Primarily for local dev against MinIO / LocalStack.
         self.bundle_s3_endpoint_url = os.environ.get("MCP_BUNDLE_S3_ENDPOINT_URL", "")
+
+
+def _load_pem(*, inline_env: str, file_env: str) -> str:
+    """Load a PEM string from either an inline env var or a file
+    path. Either can be set; the inline value wins if both are.
+    Empty strings pass through as "not configured"."""
+    inline = os.environ.get(inline_env, "")
+    if inline.strip():
+        return inline
+    path = os.environ.get(file_env, "").strip()
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return fh.read()
+        except OSError as exc:
+            raise RuntimeError(
+                f"{file_env}={path!r} could not be read: {exc}"
+            ) from exc
+    return ""
 
 
 @lru_cache(maxsize=1)
