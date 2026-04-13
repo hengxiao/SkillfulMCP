@@ -104,6 +104,11 @@ class SkillResponse(BaseModel):
     account_id: str | None = None
     owner_user_id: str | None = None
     owner_email_snapshot: str | None = None
+    # Wave 9 item J — signature metadata. `verified` is computed
+    # lazily by the single-row GET handler; list endpoints return
+    # it unset so list rendering doesn't re-hash every bundle.
+    bundle_signature_kid: str | None = None
+    verified: bool | None = None
     created_at: datetime
     updated_at: datetime
 

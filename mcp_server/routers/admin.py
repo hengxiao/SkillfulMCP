@@ -23,7 +23,7 @@ _log = get_logger("mcp.admin")
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _to_response(skill: Skill) -> SkillResponse:
+def _to_response(skill: Skill, *, verified: bool | None = None) -> SkillResponse:
     return SkillResponse(
         id=skill.id,
         name=skill.name,
@@ -35,6 +35,8 @@ def _to_response(skill: Skill) -> SkillResponse:
         account_id=skill.account_id,
         owner_user_id=skill.owner_user_id,
         owner_email_snapshot=skill.owner_email_snapshot,
+        bundle_signature_kid=skill.bundle_signature_kid,
+        verified=verified,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )
@@ -149,7 +151,10 @@ def get_skill_admin(
         )
     if not skill:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found")
-    return _to_response(skill)
+    from .. import bundle_signing
+
+    verified = bundle_signing.verify_skill(db, skill)
+    return _to_response(skill, verified=verified)
 
 
 @router.get(

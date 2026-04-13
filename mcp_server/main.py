@@ -25,6 +25,7 @@ from .routers import (
     admin,
     agents,
     audit as audit_router,
+    bundle_signature as bundle_signature_router,
     bundles,
     health,
     move_account as move_account_router,
@@ -131,6 +132,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(shares_router.router)
     app.include_router(move_account_router.router)
     app.include_router(audit_router.router)
+    app.include_router(bundle_signature_router.router)
 
     return app
 

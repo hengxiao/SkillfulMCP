@@ -57,6 +57,14 @@ class Skill(Base):
     owner_email_snapshot: Mapped[str | None] = mapped_column(
         String, nullable=True
     )
+    # Wave 9 item J — optional bundle signature.
+    # `bundle_signature` is the base64-encoded Ed25519 signature of
+    # the canonical bundle digest (see mcp_server.bundle_signing).
+    # `bundle_signature_kid` selects which public key in
+    # MCP_BUNDLE_SIGNING_PUBLIC_KEYS verifies it. Both nullable —
+    # unsigned rows render as `verified: false` on responses.
+    bundle_signature: Mapped[str | None] = mapped_column(String, nullable=True)
+    bundle_signature_kid: Mapped[str | None] = mapped_column(String, nullable=True)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=True
     )
