@@ -50,15 +50,25 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     s = Session()
+    # Wave 9.2: seed the default account the Skill rows below depend on.
+    from mcp_server.accounts import bootstrap_default_account
+    bootstrap_default_account(s)
     yield s
     s.close()
     Base.metadata.drop_all(engine)
+
+
+def _default_account_id(db) -> str:
+    from mcp_server.models import Account
+    row = db.query(Account).filter(Account.name == "default").first()
+    return row.id
 
 
 def _make_skill(db, *, skill_id, version="1.0.0", is_latest=True) -> Skill:
     s = Skill(
         id=skill_id, name=skill_id, description="",
         version=version, is_latest=is_latest, metadata_={},
+        account_id=_default_account_id(db),
     )
     db.add(s)
     db.commit()

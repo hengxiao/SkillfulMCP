@@ -370,7 +370,17 @@ class TestMembershipRoleUpdate:
 
 
 class TestBootstrapDefault:
+    @staticmethod
+    def _wipe_accounts(db_session):
+        """Remove the `default` account seeded by the conftest
+        fixture so these tests can observe bootstrap_default_account
+        on a pristine DB."""
+        from mcp_server.models import Account
+        db_session.query(Account).delete()
+        db_session.commit()
+
     def test_creates_default_and_attaches_existing_users(self, db_session):
+        self._wipe_accounts(db_session)
         _mk_user(db_session, "a@x.com")
         _mk_user(db_session, "b@x.com")
         a = acct_svc.bootstrap_default_account(db_session)
@@ -378,6 +388,7 @@ class TestBootstrapDefault:
         assert len(acct_svc.list_memberships(db_session, a.id)) == 2
 
     def test_noop_when_account_exists(self, db_session):
+        self._wipe_accounts(db_session)
         admin = _mk_user(db_session, "admin@x.com")
         acct_svc.create_account(
             db_session, name="already-there", initial_admin_user_id=admin.id

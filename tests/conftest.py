@@ -129,6 +129,16 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+
+    # Wave 9.2: catalog rows require a non-null `account_id`. The
+    # production migration backfills every existing row to a
+    # `default` account created at upgrade time; mirror that here so
+    # service-layer tests don't have to each bootstrap their own
+    # account before calling `create_skill` etc.
+    from mcp_server.accounts import bootstrap_default_account
+
+    bootstrap_default_account(session)
+
     yield session
     session.close()
     Base.metadata.drop_all(engine)

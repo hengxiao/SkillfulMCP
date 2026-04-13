@@ -42,8 +42,23 @@ def _make_tar(entries: dict[str, bytes], mode: str = "w:gz") -> bytes:
     return buf.getvalue()
 
 
+def _default_account_id(db_session) -> str:
+    """Wave 9.2: every catalog row needs a non-null account_id. The
+    db_session fixture bootstraps a `default` account; return its id
+    so the test helpers below don't each have to re-query."""
+    from mcp_server.models import Account
+
+    row = db_session.query(Account).filter(Account.name == "default").first()
+    assert row is not None, "db_session fixture should bootstrap a default account"
+    return row.id
+
+
 def _persist_skill(db_session) -> Skill:
-    s = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=True, metadata_={})
+    s = Skill(
+        id="skill-a", name="A", description="", version="1.0.0",
+        is_latest=True, metadata_={},
+        account_id=_default_account_id(db_session),
+    )
     db_session.add(s)
     db_session.commit()
     db_session.refresh(s)
@@ -192,8 +207,9 @@ class TestStore:
         assert [f.path for f in listed] == ["new"]
 
     def test_copy_bundle_between_versions(self, db_session):
-        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={})
-        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={})
+        aid = _default_account_id(db_session)
+        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={}, account_id=aid)
+        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={}, account_id=aid)
         db_session.add_all([src, dst])
         db_session.commit()
         db_session.refresh(src)
@@ -208,8 +224,9 @@ class TestStore:
         assert sorted(f.path for f in src_files) == ["SKILL.md", "x/y.txt"]
 
     def test_copy_bundle_replaces_existing(self, db_session):
-        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={})
-        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={})
+        aid = _default_account_id(db_session)
+        src = Skill(id="skill-a", name="A", description="", version="1.0.0", is_latest=False, metadata_={}, account_id=aid)
+        dst = Skill(id="skill-a", name="A", description="", version="2.0.0", is_latest=True, metadata_={}, account_id=aid)
         db_session.add_all([src, dst])
         db_session.commit()
         db_session.refresh(src)

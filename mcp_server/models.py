@@ -31,11 +31,31 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(String, default="")
     version: Mapped[str] = mapped_column(String, nullable=False)
     is_latest: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Wave 8a: visibility = 'public' makes the skill listable to any
-    # authenticated agent regardless of grants. Default 'private' is
-    # backwards-compatible with every pre-Wave-8 deployment.
+    # Wave 8a -> 9.2: visibility ∈ {public, account, private}.
+    #   public  — any authenticated agent; anonymous UI visitors.
+    #   account — members of the owning account + allow list.
+    #   private — owner, account-admins, and account-member allow-list
+    #             entries only.
+    # The column stays free-form TEXT; the Pydantic validator gates
+    # the set.
     visibility: Mapped[str] = mapped_column(
         String, nullable=False, default="private", server_default="private"
+    )
+    # Wave 9.2: tenant boundary + ownership.
+    account_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_email_snapshot: Mapped[str | None] = mapped_column(
+        String, nullable=True
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON, default=dict, nullable=True
@@ -78,10 +98,26 @@ class Skillset(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(String, default="")
-    # Wave 8a: 'public' skillset exposes ALL its members to any
-    # authenticated agent, regardless of each member skill's own flag.
+    # Wave 8a -> 9.2: visibility ∈ {public, account, private}. See
+    # Skill.visibility for the full semantics.
     visibility: Mapped[str] = mapped_column(
         String, nullable=False, default="private", server_default="private"
+    )
+    # Wave 9.2: tenant boundary + ownership (parallel to Skill).
+    account_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_email_snapshot: Mapped[str | None] = mapped_column(
+        String, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -259,6 +295,24 @@ class Agent(Base):
     skillsets: Mapped[list[str]] = mapped_column(JSON, default=list)
     skills: Mapped[list[str]] = mapped_column(JSON, default=list)
     scope: Mapped[list[str]] = mapped_column(JSON, default=list)
+    # Wave 9.2: every agent lives in exactly one account. JWTs
+    # minted for the agent carry this id at the authorization layer
+    # (wired in Wave 9.5 with the session model).
+    account_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("accounts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    owner_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    owner_email_snapshot: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

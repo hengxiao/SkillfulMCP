@@ -6,8 +6,13 @@ import semver
 
 VALID_SCOPES: frozenset[str] = frozenset({"read", "execute"})
 
-# Wave 8a — visibility flag values
-VALID_VISIBILITY: frozenset[str] = frozenset({"public", "private"})
+# Wave 8a -> 9.2 — visibility tiers.
+#   public  — any authenticated agent; anonymous UI visitors too.
+#   account — members of the resource's account + allow list.
+#   private — owner + account-admins + (allow list ∩ account members).
+# "account" replaces the Wave 8a default; existing `private` rows stay
+# private and remain backward-compatible.
+VALID_VISIBILITY: frozenset[str] = frozenset({"public", "account", "private"})
 
 
 # ---------------------------------------------------------------------------
@@ -32,6 +37,11 @@ class SkillCreate(BaseModel):
     # Wave 8a — defaults to private so callers that don't know about
     # this field continue to behave as before.
     visibility: str = "private"
+    # Wave 9.2 — optional account_id. When omitted, the catalog
+    # service stamps the row with the id of the `default` account so
+    # admin-key CLI callers + existing tests keep working unchanged.
+    account_id: str | None = None
+    owner_user_id: str | None = None
 
     @field_validator("version")
     @classmethod
@@ -62,6 +72,9 @@ class SkillUpsertBody(BaseModel):
     version: str
     metadata: dict[str, Any] = {}
     visibility: str = "private"
+    # Wave 9.2 — see SkillCreate.
+    account_id: str | None = None
+    owner_user_id: str | None = None
 
     @field_validator("version")
     @classmethod
@@ -86,6 +99,11 @@ class SkillResponse(BaseModel):
     is_latest: bool
     metadata: dict[str, Any]
     visibility: str
+    # Wave 9.2 — always populated for rows created post-migration; the
+    # 0005 backfill wrote the "default" account id into pre-9.2 rows.
+    account_id: str | None = None
+    owner_user_id: str | None = None
+    owner_email_snapshot: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -122,6 +140,9 @@ class SkillsetCreate(BaseModel):
     name: str
     description: str = ""
     visibility: str = "private"
+    # Wave 9.2 — see SkillCreate.
+    account_id: str | None = None
+    owner_user_id: str | None = None
 
     @field_validator("visibility")
     @classmethod
@@ -134,6 +155,9 @@ class SkillsetResponse(BaseModel):
     name: str
     description: str
     visibility: str
+    account_id: str | None = None
+    owner_user_id: str | None = None
+    owner_email_snapshot: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -150,6 +174,10 @@ class AgentCreate(BaseModel):
     skillsets: list[str] = []
     skills: list[str] = []
     scope: list[str] = []
+    # Wave 9.2 — optional at the wire; defaults to the `default`
+    # account in the registry layer.
+    account_id: str | None = None
+    owner_user_id: str | None = None
 
     @field_validator("scope")
     @classmethod
@@ -186,6 +214,9 @@ class AgentResponse(BaseModel):
     skillsets: list[str]
     skills: list[str]
     scope: list[str]
+    account_id: str | None = None
+    owner_user_id: str | None = None
+    owner_email_snapshot: str | None = None
     created_at: datetime
     updated_at: datetime
 

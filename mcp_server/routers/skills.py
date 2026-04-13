@@ -28,6 +28,11 @@ def _to_response(skill: Skill) -> SkillResponse:
         is_latest=skill.is_latest,
         metadata=skill.metadata_ or {},
         visibility=skill.visibility,
+        # Wave 9.2 — surface account + ownership in responses so the
+        # Web UI can render them without re-fetching.
+        account_id=skill.account_id,
+        owner_user_id=skill.owner_user_id,
+        owner_email_snapshot=skill.owner_email_snapshot,
         created_at=skill.created_at,
         updated_at=skill.updated_at,
     )

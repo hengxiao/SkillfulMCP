@@ -2,8 +2,44 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import semver
 
-from .models import Skill, SkillFile, Skillset, SkillSkillset
+from .models import Account, Skill, SkillFile, Skillset, SkillSkillset
 from .schemas import SkillCreate, SkillsetCreate
+
+
+# Wave 9.2 — default account id resolver for admin-key callers that
+# don't pass account_id explicitly. Never raises: if no default
+# account exists (fresh deployment pre-bootstrap), returns None and
+# the caller's Integrity error path surfaces the issue clearly.
+def _resolve_default_account_id(db: Session) -> str | None:
+    row = db.query(Account).filter(Account.name == "default").first()
+    return row.id if row else None
+
+
+def _stamp_account(
+    db: Session, requested: str | None
+) -> str:
+    """Return the account_id to stamp on a new catalog row.
+
+    Preference order:
+      1. explicit `requested` value (must exist).
+      2. the `default` account (created by Wave 9.0 bootstrap or
+         Wave 9.2 migration).
+
+    Raises ValueError when neither is available so the handler
+    returns a friendly 400/409 instead of letting an IntegrityError
+    bubble up.
+    """
+    if requested:
+        if db.get(Account, requested) is None:
+            raise ValueError(f"account {requested!r} does not exist")
+        return requested
+    default_id = _resolve_default_account_id(db)
+    if default_id is None:
+        raise ValueError(
+            "no default account exists; create one via POST /admin/accounts "
+            "or pass account_id explicitly"
+        )
+    return default_id
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +80,7 @@ def create_skill(db: Session, data: SkillCreate) -> Skill:
         if not db.get(Skillset, ss_id):
             raise ValueError(f"Skillset {ss_id!r} does not exist")
 
+    account_id = _stamp_account(db, data.account_id)
     skill = Skill(
         id=data.id,
         name=data.name,
@@ -52,6 +89,8 @@ def create_skill(db: Session, data: SkillCreate) -> Skill:
         metadata_=data.metadata,
         is_latest=False,
         visibility=getattr(data, "visibility", "private"),
+        account_id=account_id,
+        owner_user_id=data.owner_user_id,
     )
     db.add(skill)
     try:
@@ -79,8 +118,19 @@ def upsert_skill(
     version: str,
     metadata: dict,
     visibility: str = "private",
+    *,
+    account_id: str | None = None,
+    owner_user_id: str | None = None,
 ) -> Skill:
-    """Replace an existing skill version or create it if absent."""
+    """Replace an existing skill version or create it if absent.
+
+    Wave 9.2: when creating a net-new row, account_id is stamped via
+    _stamp_account. Updating an existing row does NOT rewrite
+    account_id or ownership — those stay with the original record
+    unless the caller explicitly overrides (via account_id / owner_user_id
+    kwargs). Keeps the "upsert a skill version" flow from silently
+    moving content between accounts.
+    """
     existing = (
         db.query(Skill)
         .filter(Skill.id == skill_id, Skill.version == version)
@@ -91,12 +141,17 @@ def upsert_skill(
         existing.description = description
         existing.metadata_ = metadata
         existing.visibility = visibility
+        if account_id:
+            existing.account_id = _stamp_account(db, account_id)
+        if owner_user_id is not None:
+            existing.owner_user_id = owner_user_id
         db.flush()
         _refresh_is_latest(db, skill_id)
         db.commit()
         db.refresh(existing)
         return existing
 
+    stamped_account = _stamp_account(db, account_id)
     skill = Skill(
         id=skill_id,
         name=name,
@@ -105,6 +160,8 @@ def upsert_skill(
         metadata_=metadata,
         is_latest=False,
         visibility=visibility,
+        account_id=stamped_account,
+        owner_user_id=owner_user_id,
     )
     db.add(skill)
     db.flush()
@@ -202,11 +259,14 @@ def list_skills_for_agent(
 # ---------------------------------------------------------------------------
 
 def create_skillset(db: Session, data: SkillsetCreate) -> Skillset:
+    account_id = _stamp_account(db, data.account_id)
     ss = Skillset(
         id=data.id,
         name=data.name,
         description=data.description,
         visibility=getattr(data, "visibility", "private"),
+        account_id=account_id,
+        owner_user_id=data.owner_user_id,
     )
     db.add(ss)
     try:
@@ -226,14 +286,21 @@ def upsert_skillset(db: Session, skillset_id: str, data: SkillsetCreate) -> Skil
         existing.name = data.name
         existing.description = data.description
         existing.visibility = visibility
+        if data.account_id:
+            existing.account_id = _stamp_account(db, data.account_id)
+        if data.owner_user_id is not None:
+            existing.owner_user_id = data.owner_user_id
         db.commit()
         db.refresh(existing)
         return existing
+    account_id = _stamp_account(db, data.account_id)
     ss = Skillset(
         id=skillset_id,
         name=data.name,
         description=data.description,
         visibility=visibility,
+        account_id=account_id,
+        owner_user_id=data.owner_user_id,
     )
     db.add(ss)
     db.commit()

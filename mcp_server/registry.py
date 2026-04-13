@@ -1,17 +1,21 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
+from .catalog import _stamp_account  # reuse the default-account helper
 from .models import Agent
 from .schemas import AgentCreate, AgentUpdate
 
 
 def create_agent(db: Session, data: AgentCreate) -> Agent:
+    account_id = _stamp_account(db, data.account_id)
     agent = Agent(
         id=data.id,
         name=data.name,
         skillsets=data.skillsets,
         skills=data.skills,
         scope=data.scope,
+        account_id=account_id,
+        owner_user_id=data.owner_user_id,
     )
     db.add(agent)
     try:
