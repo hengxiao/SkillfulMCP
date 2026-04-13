@@ -127,16 +127,26 @@ role update since there's no uniqueness to preserve.
 
 ### 2.3 Superadmin — hardcoded, env-configured, not in the database
 
-Superadmin is **not a `users` row**. It's a fixed identity defined
-by two environment variables:
+Superadmin is **not a `users` row**. It's a fixed identity with a
+reserved pseudo-email:
 
-- `MCP_SUPERADMIN_EMAIL` — plain email string used at login.
-- `MCP_SUPERADMIN_PASSWORD_HASH` — bcrypt hash, matched via the same
-  `verify_password` helper as regular users.
+- **Email:** `superadmin@skillfulmcp.com` — hardcoded in the
+  codebase, not configurable. The domain is reserved; user
+  registration refuses emails that match this string (see §3.5.1).
+- **Password:** `MCP_SUPERADMIN_PASSWORD_HASH` env var (bcrypt),
+  required at startup. Missing or empty refuses the process to
+  start with a clear error.
+
+Only the password is operator-tunable. Hardcoding the email means
+there's no way to accidentally collide with a regular user's email,
+and no "which env variable takes precedence" confusion — the
+superadmin is a fixed point of the system.
 
 The superadmin's user id is the literal string `"0"` — reserved and
-never issued to a real user (uuid4 hex never produces `"0"`, and
-the `users` table has a CHECK constraint refusing that value).
+never issued to a real user. `uuid4().hex` is 32 hex chars and can
+never equal `"0"`, so the id space is disjoint by construction; the
+`users` table additionally has a CHECK refusing `id = '0'` as a
+defense-in-depth safety net.
 
 Properties that follow:
 
@@ -156,11 +166,11 @@ Properties that follow:
   that rehashes a new password for the env var and reloads it,"
   not a DB operation.
 
-At login, `authenticate_via_server` checks the incoming email
-against `MCP_SUPERADMIN_EMAIL` first; on match, it verifies against
-`MCP_SUPERADMIN_PASSWORD_HASH` and returns a superadmin-flagged
-Operator without touching the DB. Regular users fall through to the
-existing DB lookup.
+At login, `authenticate_via_server` first checks whether the
+incoming email equals the hardcoded superadmin string; on match it
+verifies against `MCP_SUPERADMIN_PASSWORD_HASH` and returns a
+superadmin-flagged Operator without touching the DB. Regular users
+fall through to the existing DB lookup.
 
 The session grows one new flag:
 
@@ -188,29 +198,33 @@ statements must execute in this sequence):
 2. Drop `users.role` — the column is no longer needed (§2.3
    handles superadmin out-of-band; every DB row is just a user
    identity).
-3. Create one `default` account.
-4. Every existing 8b `viewer` becomes a `viewer` membership in
+3. Add `users.last_active_account_id` column with
+   `ForeignKey("accounts.id", ondelete="SET NULL")` (nullable).
+   This happens AFTER step 1 so the FK target exists.
+4. Create one `default` account.
+5. Every existing 8b `viewer` becomes a `viewer` membership in
    `default`.
-5. Every existing 8b `admin` becomes an `account-admin` membership
+6. Every existing 8b `admin` becomes an `account-admin` membership
    in its own fresh account named `"{email}'s team"`. Each admin
    gets their own tenant; admins who previously shared the flat
    pool don't silently merge.
-6. Add the `account_memberships` indices (composite PK on
+7. Add the `account_memberships` indices (composite PK on
    `(user_id, account_id)` plus a secondary on `account_id` alone
    for membership-list lookups).
-7. Add the `users.id != '0'` CHECK so no DB row can accidentally
-   collide with the hardcoded superadmin id.
+8. Add the `users.id != '0'` CHECK so no DB row can accidentally
+   collide with the hardcoded superadmin id. (Wave 8b rows use
+   uuid4 hex which is 32 chars and cannot equal `"0"`; the CHECK
+   passes against existing rows without a table rewrite.)
 
 The old `MCP_WEBUI_OPERATORS` env var stays supported for
 bootstrapping the `users` table on an empty DB (same semantics as
 Wave 8b). Every entry becomes a regular user with an `account-admin`
 membership in `default`. Empty table + empty env still logs the
-"refuse all logins" warning, same as today.
+"refuse all logins" warning.
 
-Superadmin identity comes from the new env pair `MCP_SUPERADMIN_EMAIL`
-+ `MCP_SUPERADMIN_PASSWORD_HASH` (see §2.3). These are **required**
-in Wave 9 deployments — missing either one refuses startup with a
-clear error message.
+Superadmin identity comes from the `MCP_SUPERADMIN_PASSWORD_HASH`
+env var (see §2.3). This is **required** in Wave 9 deployments —
+missing or empty refuses startup with a clear error message.
 
 ---
 
@@ -311,41 +325,137 @@ create catalog content in a specific account. Read-only actions
 (listing all accounts, etc.) work without an active account.
 
 `last_active_account_id` is updated on every
-`POST /session/switch-account` and on logout.
+`POST /session/switch-account` and on logout. The column has
+`ON DELETE SET NULL` against `accounts.id`, so an account-delete
+(§3.7) quietly clears it rather than breaking the next login.
+
+**Stale-session self-heal.** If a user is removed from their
+current `active_account_id` by another session (e.g., an admin
+kicks them), their own session's `active_account_id` still points
+at an account they no longer belong to. On the next request, the
+membership-resolution layer detects the mismatch, clears
+`active_account_id` + `active_role`, and re-runs the §3.4
+selection inline. The request then proceeds against the new
+active account (or the landing banner if they have no memberships
+left). No explicit re-login is required.
 
 ### 3.5 User / membership lifecycle
 
-#### 3.5.1 Create a user
+Wave 9 moves user creation out of the admin surface entirely. Users
+self-register, and accounts are created by the users who want them.
+Account-admins manage **account and membership access**, not user
+rows. There is no "admin deletes a user" path — admins can only
+remove someone's **membership**; the user's identity row persists
+as long as the user exists.
 
-- **superadmin**: the only caller who can mint a user row that
-  isn't attached to an account. In practice this is rare — most
-  user creation happens via the invite flow below, which atomically
-  creates the user + their first membership.
-- **account-admin**: invites an email to their account via
-  `POST /admin/accounts/{account_id}/members` (§3.5.2). If a user
-  with that email already exists, a membership is added; if not, a
-  new `users` row is created with a server-supplied initial
-  password (copy-link fallback; SMTP delivery is Wave 9.1).
-- **contributor / viewer**: cannot create users or memberships.
+#### 3.5.1 User signup (self-service)
 
-(There is no "platform user" vs "regular user" distinction anymore
-— every DB row is just a user. The only platform-level identity is
-the env-hardcoded superadmin in §2.3.)
-
-#### 3.5.2 Add / remove membership
+Public endpoint:
 
 ```
-POST   /admin/accounts/{account_id}/members
-  body: {email, role, password?}
-  - If a user with `email` exists, add a membership with `role`.
-  - Else create a user + add a membership in the same transaction.
+POST /signup
+  body: {email, password, display_name}
+  - Creates a users row, bcrypt-hashes the password.
+  - Refuses if `email == 'superadmin@skillfulmcp.com'` (reserved).
+  - Refuses duplicate emails (existing account offers "Sign in").
+  - Settings-gated: `MCP_ALLOW_PUBLIC_SIGNUP` (default: false).
+    When false, `/signup` only accepts emails that are listed in
+    at least one pending invitation (§3.5.2). Deployments that
+    want open signup flip the flag.
+  - On success, consumes every `pending_membership` row matching
+    the new user's email: insert the corresponding membership
+    rows, delete the pending rows. All in the same transaction.
+  - Logs the signup event with `invited_memberships=[...]` for
+    audit.
+```
 
-DELETE /admin/accounts/{account_id}/members/{user_id}?new_owner_id=<uid>
-  - Remove the membership (last-admin guarded, §2.2 pattern).
-  - Optional new_owner_id reassigns the departing user's owned
-    catalog rows in this account (§3.5.4).
-  - Does NOT delete the user row — the user may have memberships
-    in other accounts.
+New users with no invitation and no `MCP_ALLOW_PUBLIC_SIGNUP=true`
+cannot land anywhere — the signup endpoint 403s. A landing-page
+banner explains what to do ("ask the account admin to invite you").
+
+Self-delete:
+
+```
+DELETE /users/me
+  - Removes the caller's user row. Cascades all their memberships.
+  - Last-admin guard runs per account: if removing the user's
+    account-admin membership would leave an account with zero
+    active admins, the call 409s with a list of the affected
+    accounts. The user must either promote someone else or delete
+    each account first.
+  - Owned catalog rows follow the membership-removal reassignment
+    rule (§3.5.4) per account.
+```
+
+No other hard-delete path for users exists. Abuse moderation: the
+superadmin can `disabled=true` any user, which blocks login and
+hides them from membership pickers without removing the row.
+
+#### 3.5.2 Invite / add / remove memberships
+
+An account-admin doesn't create user rows — they invite emails.
+If the email matches an existing user, the membership is added
+immediately. If not, a **pending invitation** row is stored and
+consumed when that email eventually signs up (§3.5.1).
+
+New table `pending_memberships`:
+
+```python
+class PendingMembership(Base):
+    __tablename__ = "pending_memberships"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(
+        String, ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    invited_by_user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+    )
+    created_at: Mapped[datetime] = ...
+    __table_args__ = (UniqueConstraint("email", "account_id",
+        name="uq_pending_membership_email_account"),)
+```
+
+Security note: Wave 9 does not send invitation emails or use
+verification tokens. That's deferred to Wave 9.1 along with SMTP.
+Implication: if evil-bob signs up with alice@corp.com before Alice
+does, he inherits the pending memberships intended for her. This is
+a known gap that the email-verification follow-up closes. Until
+then, deployments with sensitive sharing should keep
+`MCP_ALLOW_PUBLIC_SIGNUP=false` (the default) and trust that
+operators are picking email recipients who have not yet registered
+but will.
+
+Endpoints:
+
+```
+POST   /accounts/{account_id}/members
+  body: {email, role}
+  - If a users row with that email exists → insert
+    account_memberships(user_id, account_id, role).
+  - Else → insert pending_memberships(email, account_id, role).
+  - 409 if (email, account_id) already present in either table.
+
+GET    /accounts/{account_id}/members
+  - Returns the merged list of active memberships + pending
+    invitations (distinguished by a `pending: bool` flag).
+
+PUT    /accounts/{account_id}/members/{user_id}
+  body: {role}
+  - Active memberships only; pending entries are re-issued via
+    DELETE + POST.
+  - Role-change rules: §3.5.3.
+
+DELETE /accounts/{account_id}/members/{user_id}?new_owner_id=<uid>
+  - Remove the membership; last-admin guarded.
+  - Optional new_owner_id reassigns the departing user's catalog
+    rows in this account (§3.5.4).
+  - Does NOT delete the user row.
+
+DELETE /accounts/{account_id}/pending/{pending_id}
+  - Revoke a pending invitation.
 ```
 
 Only superadmin and account-admins of `account_id` can call these.
@@ -353,45 +463,68 @@ Only superadmin and account-admins of `account_id` can call these.
 #### 3.5.3 Role changes
 
 - Changing a membership's role happens on
-  `PUT /admin/accounts/{account_id}/members/{user_id}` with body
+  `PUT /accounts/{account_id}/members/{user_id}` with body
   `{role: "<new>"}`.
-- Any account-admin can change any other membership's role in their
-  account, including promoting a contributor to another
+- Any account-admin can change any other membership's role in
+  their account, including promoting a contributor to another
   account-admin (§2.2 flagged this as intentional).
 - An account-admin cannot demote themselves from `account-admin`
-  if they'd become the last admin — the last-admin guard rejects
-  the update.
+  if they'd become the last admin — the last-admin guard rejects.
 - Superadmin can change any membership's role in any account.
 
-#### 3.5.4 Delete a user row
+#### 3.5.4 Catalog reassignment on membership removal
 
-Superadmin-only hard delete. Refused if the user holds any
-`account-admin` membership; the operator must remove those
-memberships first (promote another member, then demote /
-remove the target). Normal "remove from account" is §3.5.2.
-
-When removing a membership (§3.5.2), the departing user's owned
-catalog rows in **that specific account** need a new owner. The
-handler accepts an optional `new_owner_id` (a user with membership
-in the same account); default is the oldest account-admin of the
-account. Auto-promotion rule:
+When a membership is removed (either via §3.5.2 DELETE or via
+§3.5.1 self-delete), the departing user's owned catalog rows in
+**that specific account** need a new owner. The handler accepts an
+optional `new_owner_id` (a user with membership in the same
+account); default is the oldest account-admin of the account.
+Auto-promotion rule:
 
 | What the target inherits | Minimum membership role |
 | ------------------------ | ------------------------ |
 | owned skills / skillsets | `contributor` |
 
 A `viewer` who is picked as the target is promoted to `contributor`
-in that account. Promotions to `account-admin` never happen via the
-inheritance path — that's always an explicit operator action.
+in that account. Promotions to `account-admin` never happen via
+the inheritance path — that's always an explicit operator action.
 
-### 3.6 Delete an account
+### 3.6 Create an account (any logged-in user)
 
-Superadmin-only. Because `account_id` is **NOT NULL** on skills,
-skillsets, and agents (§4.1), the handler cannot orphan catalog
-rows — it must either cascade-delete them or require the superadmin
-to have moved them first.
+Account creation is **self-service**. Any authenticated user can
+call:
 
-Wave 9 chooses cascade-delete behind a double interlock:
+```
+POST /accounts
+  body: {name}
+  - Creates an accounts row with name (unique check).
+  - Atomically inserts an account_memberships row for the caller
+    with role='account-admin'.
+  - Updates the caller's users.last_active_account_id so their
+    next request lands in the new account.
+  - Rate-limited: MCP_ACCOUNT_CREATE_PER_USER_PER_DAY (default 5)
+    throttles per-user creation to prevent runaway tenant spam.
+```
+
+Account-admins do **not** mint other accounts for their users —
+an admin's authority is scoped to memberships and catalog within
+their own account. If a member wants their own separate account,
+they create it themselves and optionally invite their
+collaborators.
+
+The superadmin does not participate in the normal create flow —
+they're oversight, not a tenant creator. They can still call
+`POST /accounts` (any user can), but it's not their primary role.
+
+### 3.7 Delete an account
+
+Deleting an account is authorized for any `account-admin` of that
+account OR the superadmin. Because `account_id` is **NOT NULL** on
+skills, skillsets, and agents (§4.1), the handler cannot orphan
+catalog rows — it must cascade-delete them as part of the same
+transaction.
+
+Wave 9 requires a double interlock:
 
 1. Query param `?confirm_user_count=<N>&confirm_skill_count=<M>`
    must match the current counts exactly. Fat-finger protection.
@@ -415,6 +548,9 @@ With both interlocks satisfied, the handler:
 
 All in one transaction. Emits one `account.deleted` structured log
 line per affected row for forensics.
+
+Last-admin guard does not apply here — deleting the whole account
+is a separate concept from demoting the last admin within it.
 
 ---
 
@@ -441,9 +577,10 @@ owner_email_snapshot: Mapped[str | None] = mapped_column(
 - `account_id` is **required** — the tenant boundary. Stamped from
   the session's `active_account_id` at create time. Immutable
   thereafter in Wave 9 (a future wave can add move-between-accounts).
-  `ON DELETE RESTRICT` means an account cannot be dropped while
-  catalog rows still reference it; the account-delete handler
-  (§3.6) either cascades everything or refuses.
+  `ON DELETE RESTRICT` is deliberate: it makes accidental cascades
+  from a raw `DELETE FROM accounts` impossible. The account-delete
+  handler in §3.7 issues explicit `DELETE`s on child rows in order
+  before deleting the account, opting into the cascade explicitly.
 - `owner_user_id` is the creator. Stamped from the session. Nullable
   only because a user can be deleted out from under their owned
   rows; the membership-removal handler (§3.5) reassigns proactively
@@ -607,49 +744,61 @@ Token issuance:
 
 ### 5.1 New endpoints
 
-Accounts:
+User identity (self-service):
 
 ```
-POST   /admin/accounts
-  body: {name, initial_admin: {email, password?, display_name}}
-  superadmin-only. Creates account + one account-admin membership
-  in the same transaction. If `email` matches an existing user,
-  just attach a membership; else create the user (initial password
-  required in that branch).
+POST   /signup                             public; see §3.5.1
+  body: {email, password, display_name}
+  - Refuses the reserved superadmin@skillfulmcp.com email.
+  - Gated by MCP_ALLOW_PUBLIC_SIGNUP; when false, the email must
+    match at least one pending_memberships row.
+  - Consumes pending memberships into real memberships.
 
-GET    /admin/accounts                     superadmin: all; user: accounts they're a member of
-GET    /admin/accounts/{id}                superadmin; membership-holders for their own account
-DELETE /admin/accounts/{id}?confirm_user_count=N&confirm_skill_count=M
-                                           superadmin-only (see §3.6)
+PUT    /users/me                           self; update display_name / password.
+DELETE /users/me                           self; last-admin guarded per §3.5.1.
 ```
 
-Memberships:
+Accounts (any authenticated user):
 
 ```
-POST   /admin/accounts/{account_id}/members
-  body: {email, role, password?}
+POST   /accounts                           any user; see §3.6
+  body: {name}
 
-GET    /admin/accounts/{account_id}/members
+GET    /accounts                           superadmin: all; user: accounts they're a member of.
+GET    /accounts/{id}                      superadmin; membership-holders for their own account.
+DELETE /accounts/{id}?confirm_user_count=N&confirm_skill_count=M&confirm_skillset_count=S&confirm_agent_count=A&cascade_catalog=1
+                                           account-admin of the target OR superadmin; see §3.7.
+```
 
-PUT    /admin/accounts/{account_id}/members/{user_id}
+Memberships (account-admin or superadmin only):
+
+```
+POST   /accounts/{account_id}/members
+  body: {email, role}
+  - If email matches a users row → insert membership.
+  - Else → insert pending_memberships row.
+
+GET    /accounts/{account_id}/members
+  - Returns active + pending, with a `pending: bool` flag.
+
+PUT    /accounts/{account_id}/members/{user_id}
   body: {role}
 
-DELETE /admin/accounts/{account_id}/members/{user_id}?new_owner_id=<uid>
+DELETE /accounts/{account_id}/members/{user_id}?new_owner_id=<uid>
   - Runs the catalog-reassignment step if the departing user owns
-    skills/skillsets in this account (§3.5.4). Protected by
-    last-admin guard.
+    skills/skillsets in this account (§3.5.4). Last-admin guarded
+    via SELECT ... FOR UPDATE (§2.2).
+
+DELETE /accounts/{account_id}/pending/{pending_id}
 ```
 
-Users (identity-level; simplified from Wave 8b):
-
-```
-POST   /admin/users                        superadmin-only
-  body: {email, password, display_name, role}
-  role: 'user' | 'superadmin' (platform-level)
-
-PUT    /admin/users/{id}                   superadmin: any; self: display_name + password
-DELETE /admin/users/{id}                   superadmin-only; see §3.5.4
-```
+There is **no** `/admin/users` surface. Admins manage memberships,
+not user identities. The superadmin is oversight-only — they can
+read any user row through `/accounts/{id}/members` listings but
+cannot delete user rows; the self-delete endpoint is the only
+removal path. The one exception is `disabled=true`, which the
+superadmin can set on any user via `PUT /users/{id}/disable`
+(platform-level abuse moderation).
 
 Sharing (unchanged from earlier draft):
 
@@ -725,13 +874,15 @@ accounts" view for cross-account browsing.
 
 ### 6.2 Accounts page (superadmin)
 
-New top-level nav item, superadmin-only. Lists accounts with
+New top-level nav item, superadmin-only. Lists every account with
 columns: name, admin count, user count, skill count, created.
-Row actions: open (→ /admin/accounts/{id}), delete (with the
+Row actions: open (→ /accounts/{id}), delete (with the
 confirmation-count interlock).
 
-Create-account form: name + initial admin (email + password +
-display_name). One atomic call to `POST /admin/accounts`.
+Superadmin does NOT have a create-account form here — account
+creation is the self-service flow at `/accounts/new` (§6.7), which
+every authenticated user (including superadmin) can use. The
+superadmin's role on this page is observe + delete, not mint.
 
 ### 6.3 Account detail page
 
@@ -819,11 +970,36 @@ The flip is logged as a structured `resource.visibility_changed`
 event so the audit trail captures the silent-disable of those
 entries.
 
+The reverse flip (`private` → `account`) runs a symmetric
+confirmation when non-member entries exist: "N allow-list entries
+will become effective (previously-inert because they weren't
+account members)." This prevents a quiet grant to users the
+operator has forgotten about.
+
 ### 6.6 Landing page (already shipped, clarification)
 
 Public catalog landing stays as shipped in commit [9b75439]. The
 `account` visibility tier is hidden from anonymous visitors; the
 public list stays `public` only.
+
+When `is_superadmin=True` and `active_account_id is None`, the
+landing-page counts (skills / skillsets / agents) are **platform-
+wide** — sum across every account. When the superadmin switches
+into an account, the counts drop to that account's scope. Regular
+users always see their active account's counts.
+
+### 6.7 Signup & create-account pages
+
+Two new top-level pages for the self-service flow:
+
+- `GET /signup` — form with email, password, display_name fields.
+  When `MCP_ALLOW_PUBLIC_SIGNUP=false`, the form pre-validates the
+  email via `GET /signup/invite-check?email=...` and refuses to
+  submit unless at least one pending invitation matches.
+- `GET /accounts/new` — any logged-in user can reach this;
+  renders a form with a single "Account name" field and submits to
+  `POST /accounts`. On success redirects to the new account's
+  detail page.
 
 ---
 
@@ -870,9 +1046,16 @@ def require_membership_role(path_param: str = "account_id",
     endpoint (POST/PUT/DELETE), the dep emits a structured audit
     log line:
        event=admin.superadmin_acting
+       actor_email=superadmin@skillfulmcp.com
        account_id=<path>  method=<METHOD>  path=<URL>
-    so the forensics trail captures which account each superadmin
-    action touched."""
+       target_user_id=<id if present in path>
+       resource_id=<id if present in path>
+    so the forensics trail captures who took the action, which
+    account it touched, and which specific row was affected (if
+    applicable). Handlers can extend the log bag with additional
+    `interesting_fields` via a request-scoped helper if they have
+    more to record (e.g., `old_role` and `new_role` on a
+    role-change)."""
 
 def require_catalog_access(resource_kind: str,
                            op: str = "read"):
@@ -884,8 +1067,9 @@ def require_catalog_access(resource_kind: str,
 
 Gating:
 
-- `POST /admin/accounts`, `DELETE /admin/accounts/{id}` → `require_superadmin()`.
-- `POST /admin/accounts/{id}/members`, `PUT .../members/{user_id}`, `DELETE .../members/{user_id}` → `require_membership_role("id", "account-admin")`.
+- `POST /accounts` → `require_authenticated_user()` (any logged-in user; rate-limited).
+- `DELETE /accounts/{id}` → `require_membership_role("id", "account-admin")` (superadmin short-circuits).
+- `POST /accounts/{id}/members`, `PUT .../members/{user_id}`, `DELETE .../members/{user_id}` → `require_membership_role("id", "account-admin")`.
 - `POST /skills`, `POST /skillsets` → `require_membership_role("<session.active_account_id>", "contributor", "account-admin")`.
 - `PUT`/`DELETE` skills/skillsets → `require_catalog_access(..., op="write")`.
 - `POST /token` → `require_membership_role("<agent.account_id>", "account-admin")`.
@@ -969,8 +1153,8 @@ Coverage gate stays at 85%. New code ≈ 1,000 LoC; tests ≈ 700 LoC.
 
 | Step | Deliverable |
 | ---- | ----------- |
-| 9.0 | Migration `0004_accounts_and_memberships`: create `accounts` + `account_memberships` tables, drop `users.role`, add `users.last_active_account_id` + `users.id != '0'` CHECK. Migrate Wave 8b admins/viewers per §2.4. Env superadmin (`MCP_SUPERADMIN_EMAIL` + `MCP_SUPERADMIN_PASSWORD_HASH`) required at startup. Service-layer last-admin guard (with `SELECT ... FOR UPDATE`). |
-| 9.1 | `/admin/accounts/*` + `/admin/accounts/{id}/members/*` endpoints. `require_superadmin` + `require_membership_role` deps + `admin.superadmin_acting` audit logging on writes. Session stores `{user_id, email, is_superadmin, active_account_id, active_role}` (memberships re-fetched per request). `/session/switch-account`. Active-account selection at login per §3.4. |
+| 9.0 | Migration `0004_accounts_and_memberships`: create `accounts`, `account_memberships`, and `pending_memberships` tables. Drop `users.role`. Add `users.last_active_account_id` (FK ON DELETE SET NULL to `accounts.id`). Add `users.id != '0'` CHECK. Migrate Wave 8b admins/viewers per §2.4. Env superadmin (`MCP_SUPERADMIN_PASSWORD_HASH`, email hardcoded) required at startup. Service-layer last-admin guard (with `SELECT ... FOR UPDATE`). |
+| 9.1 | `/signup`, `/accounts`, `/accounts/{id}/members`, `/accounts/{id}/pending`, `/users/me` endpoints. `require_superadmin`, `require_membership_role`, `require_authenticated_user` deps + `admin.superadmin_acting` audit logging on writes. Session stores `{user_id, email, is_superadmin, active_account_id, active_role}` (memberships re-fetched per request). `/session/switch-account`. Active-account selection at login per §3.4. Self-heal of stale `active_account_id` on every request. |
 | 9.2 | Migration `0005_catalog_account`: `account_id` (NOT NULL) + `owner_user_id` + `owner_email_snapshot` on skills + skillsets + agents. Server-side stamping from `active_account_id` on create. New `visibility='account'` tier (replaces Wave 8a 2-state). Update `can_read` / agent authorization. |
 | 9.3 | Filter GET lists per §4.4 + `?mine` / `?shared` / `?account_id` params. |
 | 9.4 | Migration `0006_shares`: `skill_shares` / `skillset_shares` tables + `/shares` CRUD endpoints. Private + private-with-inert-entry semantics. |
