@@ -41,10 +41,12 @@ imagine running it in production.
 - **SQLite with `StaticPool` and a process-local file.** No horizontal
   scaling; every replica would diverge. Write lock contention even within
   one process under load. No point-in-time recovery, replication, or backup.
-- **Bundle bytes live in the `skill_files.content` BLOB column.** Files up
-  to 100 MB per bundle in a relational database is fine for a prototype and
-  wrong at scale (hot-row contention, backup size, replication lag).
-  [spec/skill-bundles.md](skill-bundles.md) already anticipates this move.
+- **~~Bundle bytes live in the `skill_files.content` BLOB column.~~**
+  **Addressed in Wave 5** — `BundleStore` abstraction with two backends.
+  Default stays `InlineBundleStore` (blob in column) for dev + single-
+  node. Production flips to `S3BundleStore` via `MCP_BUNDLE_STORE=s3`.
+  Migrating existing inline data to S3 is still a separate operational
+  task (future migration script).
 - **No migrations framework.** Schema changes rely on
   `Base.metadata.create_all()` and dropping the DB; production migrations
   must be additive, reversible, and run during deploy.
@@ -202,12 +204,15 @@ order.
   classic "PR forgot the migration" drift) and round-trips
   `downgrade base`. Postgres parity covered by the same tests when
   `MCP_TEST_POSTGRES_URL` is set.
-- **[P0] Move bundle bytes to object storage.** Keep the `skill_files` row
-  as the index; swap the `content BLOB` column for `storage_key TEXT`,
-  `storage_backend TEXT`, `size`, `sha256`. Implement a `BundleStore`
-  interface with two backends: SQLite-BLOB (for dev) and S3-compatible.
-  The abstraction already exists in the spec ([skill-bundles.md](skill-bundles.md));
-  ship the S3 implementation.
+- **[P0 — SHIPPED (code); migration pending] Move bundle bytes to object
+  storage.** `BundleStore` interface + `InlineBundleStore` +
+  `S3BundleStore` shipped in Wave 5. Flip `MCP_BUNDLE_STORE=s3` with
+  `MCP_BUNDLE_S3_BUCKET=…` to switch backends on a new deployment. The
+  `skill_files` row remains the authoritative index (size, sha256, path);
+  only the byte residency differs. Archive replace semantics delete old
+  S3 objects so there are no orphans. Migration script to move existing
+  inline data to S3 on a live deployment is still TODO; tracked as a
+  separate operational task.
 - **[P1] Read replicas for catalog reads.** Route `GET /skills*` and
   `GET /admin/*` to replicas via a separate `session_factory_readonly`.
   Writes stay on primary.

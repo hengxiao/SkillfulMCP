@@ -42,6 +42,18 @@ def _reset_auth_singleton():
     yield
     reset_default_service()
 
+
+@pytest.fixture(autouse=True)
+def _reset_bundle_store():
+    """Clear the module-level default BundleStore between tests so that
+    a test that switches to MCP_BUNDLE_STORE=s3 doesn't poison later
+    inline-mode tests."""
+    from mcp_server.bundles import reset_default_store
+    reset_default_store()
+    yield
+    reset_default_store()
+
+
 # ---------------------------------------------------------------------------
 # Constants used across tests
 # ---------------------------------------------------------------------------

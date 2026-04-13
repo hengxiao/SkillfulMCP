@@ -106,18 +106,28 @@ string. Clients that only know about the latest version must first call
 
 ## Storage Layer Abstraction
 
-A narrow storage interface lives alongside the catalog:
+Shipped in Wave 5. The real interface (see
+[`mcp_server/bundles.md`](mcp_server/bundles.md) for the full spec):
 
 ```python
-class BundleStore(Protocol):
-    def put(self, skill_pk: int, files: Iterable[BundleFile]) -> BundleStats: ...
-    def list(self, skill_pk: int) -> list[BundleFileInfo]: ...
-    def get(self, skill_pk: int, path: str) -> bytes | None: ...
-    def delete(self, skill_pk: int) -> int: ...
+class BundleStore(ABC):
+    backend_name: str
+    def put_files(db, skill_pk, files) -> BundleStats: ...
+    def list_files(db, skill_pk) -> list[BundleFileInfo]: ...
+    def read_file(db, skill_pk, path) -> BundleFileContent | None: ...
+    def delete_all(db, skill_pk) -> int: ...
+    def copy_all(db, src_pk, dst_pk) -> BundleStats: ...
+    def build_targz(db, skill_pk) -> bytes: ...
 ```
 
-The default implementation writes to the `SkillFile` table. A future S3 backend
-implements the same protocol; the `SkillFile` row keeps only the object key.
+Two implementations:
+- `InlineBundleStore` (default) — bytes in `SkillFile.content`.
+- `S3BundleStore` — bytes in an S3-compatible object store at
+  `{prefix}/pk{skill_pk}/{path}`. `SkillFile.content` is a `b""`
+  placeholder so the NOT-NULL schema is preserved.
+
+Active backend is chosen per deployment via `MCP_BUNDLE_STORE=inline|s3`.
+The `SkillFile` row is the authoritative index in both backends.
 
 ## Web UI
 

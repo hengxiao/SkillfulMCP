@@ -1,116 +1,155 @@
 # mcp_server/bundles.py
 
-Archive decoding + bundle storage. Sits between the HTTP layer
-(`routers/bundles.py`) and the `SkillFile` ORM model. The conceptual design
-is in [`../skill-bundles.md`](../skill-bundles.md); this file documents the
-code contract.
+Archive extraction + bundle storage. Conceptual design in
+[`../skill-bundles.md`](../skill-bundles.md); this spec documents the
+module contract.
 
-## Limits
+## Shape
+
+Two concerns live here:
+
+1. **Archive extraction** — format detection, safe path handling, size
+   guards. Pure functions, no I/O beyond the archive bytes.
+2. **`BundleStore`** — abstract interface for persisting / retrieving
+   per-file bytes alongside the `skill_files` index rows. Two concrete
+   implementations:
+   - `InlineBundleStore` — bytes live in `skill_files.content`. Default
+     for dev and single-node deployments.
+   - `S3BundleStore` — bytes live in an S3-compatible object store;
+     `skill_files.content` is a `b""` placeholder so the existing
+     NOT-NULL schema stays intact. Requires `pip install -e ".[s3]"`.
+
+The choice is a **process-wide deployment decision**. Mixing inline and
+S3 rows within the same catalog is not supported in this wave; a
+migration script (future work) can move data between the backends.
+
+## Limits (spec/skill-bundles.md §"Size Limits")
 
 ```python
 MAX_BUNDLE_BYTES = 100 * 1024 * 1024   # 100 MB total uncompressed
 MAX_FILE_COUNT   = 10_000
 ```
 
-Monkey-patched in tests that want smaller limits.
+Monkey-patched in tests that need smaller limits.
 
 ## Data classes
 
-- `BundleFile(path, content)` — extracted file.
-- `BundleFileInfo(path, size, sha256)` — listing row.
-- `BundleStats(file_count, total_size)` — return value from upload / copy.
-- `BundleError` — `ValueError` subclass raised on any extraction failure;
-  router converts to 400 `Bad Request`.
+| Class                 | Purpose                                                 |
+| --------------------- | ------------------------------------------------------- |
+| `BundleFile`          | Extracted file (path + content bytes)                   |
+| `BundleFileInfo`      | Index row shape (path + size + sha256)                  |
+| `BundleFileContent`   | `read_file` return type (index fields + content bytes)  |
+| `BundleStats`         | `put_files` / `copy_all` result (file_count, total_size) |
+| `BundleError`         | `ValueError` subclass; router converts to 400           |
 
-## Archive formats
+## Archive extraction
 
-`detect_format(bytes) -> str` reads magic bytes; returns one of:
+`detect_format(bytes) -> str` — magic-byte sniff. Returns `"zip"`,
+`"tar"`, `"tar.gz"`, `"tar.bz2"`, or `"tar.xz"`; raises `BundleError`
+for anything else. Filename and content-type are ignored — magic bytes
+are the truth.
 
-| Format  | Magic                                          |
-| ------- | ---------------------------------------------- |
-| `zip`   | `PK\x03\x04` / `PK\x05\x06` / `PK\x07\x08`     |
-| `tar.gz`| `\x1f\x8b`                                     |
-| `tar.bz2`| `BZh`                                         |
-| `tar.xz`| `\xfd7zXZ\x00`                                 |
-| `tar`   | `ustar` at offset 257                          |
+`extract_archive(data, *, strip_common_prefix=False) -> list[BundleFile]`:
+1. Sniff format.
+2. Walk entries, rejecting directories, symlinks, hardlinks, and anything
+   that would push cumulative uncompressed size past `MAX_BUNDLE_BYTES`
+   or file count past `MAX_FILE_COUNT`.
+3. `_normalize_path` on each name — absolute paths and `..` segments are
+   rejected with `BundleError`. Segment-level parsing (not `str.lstrip`)
+   so `"../evil"` does NOT silently collapse to `"evil"` (regression-
+   tested).
+4. Optionally strip a shared top-level directory when the caller sets
+   `strip_common_prefix=True`. Safeguards: only strips when ≥ 2 entries
+   share the prefix and every path would survive the strip.
+5. Deduplicate by path (last wins), sort, return.
 
-Content-type / filename are **ignored** — magic bytes are truth. Unknown →
-`BundleError("unsupported archive format …")`.
+## `BundleStore` interface
 
-## `extract_archive(data, *, strip_common_prefix=False) -> list[BundleFile]`
+```python
+class BundleStore(ABC):
+    backend_name: str
 
-1. `detect_format(data)`.
-2. Read entries (zipfile / tarfile branch). For each entry:
-   - Skip directories.
-   - Reject symlinks / hardlinks in tar (explicit check; `BundleError`).
-   - Reject anything that pushes the file count past `MAX_FILE_COUNT`.
-   - Reject anything that pushes cumulative uncompressed size past `MAX_BUNDLE_BYTES` — uses `member.file_size` / `member.size` *before* reading bytes, so a zip bomb can't allocate past the cap.
-3. `_normalize_path(raw)` on each entry name:
-   - Reject absolute paths (`/etc/passwd` → `BundleError`).
-   - Reject `..` as a standalone segment (`../evil` → `BundleError`).
-   - Drop empty / `.` segments; normalize backslashes to `/`.
-4. Optionally strip a shared top-level directory (opt-in via `strip_common_prefix=True`). Safe-guards:
-   - Only strips when **≥ 2 entries** share the same top-level segment and each path would survive the strip.
-   - Default is **off** — the upload endpoint intentionally does not auto-strip. The importer for `anthropics/skills` assembles per-skill tarballs with pre-stripped paths, so it doesn't need this either.
-5. Dedup by path (last write wins), sort, return.
+    def put_files(db, skill_pk, files) -> BundleStats: ...
+    def list_files(db, skill_pk) -> list[BundleFileInfo]: ...   # shared impl
+    def read_file(db, skill_pk, path) -> BundleFileContent | None: ...
+    def delete_all(db, skill_pk) -> int: ...
+    def copy_all(db, src_skill_pk, dst_skill_pk) -> BundleStats: ...
+    def build_targz(db, skill_pk) -> bytes: ...                 # shared impl
+```
 
-### Why a separate `_normalize_path`
+- `put_files` must be a **replace** — delete any prior state for this
+  `skill_pk` before writing the new files, so there are no orphans.
+- `list_files` and `build_targz` have shared default implementations on
+  the base class that read the DB index; backends generally don't
+  override these.
+- `read_file` returns `BundleFileContent | None`. Routers access
+  `.content`, `.size`, `.sha256`, `.path` — attribute-compatible with the
+  old pre-refactor `SkillFile` return.
 
-The current rule uses segment-level parsing (split on `/`, reject `..` segments) rather than `str.lstrip("./")`. The latter was tried in an earlier revision and silently collapsed `"../evil"` to `"evil"` because `lstrip` removes *any character in the set*, not the literal prefix. Regression tests cover both cases.
+## `InlineBundleStore`
 
-## `store_bundle(db, skill_pk, files) -> BundleStats`
+Stores bytes directly in `SkillFile.content`. Every method is a small
+SQL + ORM operation.
 
-Atomic replace:
-1. Bulk-delete existing `SkillFile` rows for `skill_pk`.
-2. For each `BundleFile`: compute `sha256`, insert a row.
-3. Commit.
-4. Return counts.
+## `S3BundleStore`
 
-## `list_bundle(db, skill_pk) -> list[BundleFileInfo]`
+Key layout: `{prefix}/pk{skill_pk}/{path}`.
 
-All files for this skill version, ordered by path.
+- `put_files` — wipe `skill_files` rows + S3 objects under
+  `{prefix}/pk{skill_pk}/`, then upload each file and insert a row with
+  `content=b""` + size + sha256.
+- `read_file` — DB fetch for the index row, S3 GET for the bytes. If the
+  S3 object is missing while the row exists (storage drift), returns
+  `None` rather than raising.
+- `copy_all` — uses `CopyObject` (server-side) to avoid round-tripping
+  bytes through the catalog process.
+- `delete_all` — list + bulk delete S3 objects, then bulk delete rows.
 
-## `get_file(db, skill_pk, path) -> SkillFile | None`
+Dev-friendly knobs:
+- `MCP_BUNDLE_S3_ENDPOINT_URL` — plug in MinIO / LocalStack.
+- `MCP_BUNDLE_S3_REGION` — explicit region (else boto3 auto-resolves).
 
-Single-row fetch by `(skill_pk, path)`.
+## Module-level shims
 
-## `delete_bundle(db, skill_pk) -> int`
+`store_bundle`, `list_bundle`, `get_file`, `delete_bundle`, `copy_bundle`,
+`build_targz` keep the pre-Wave-5 signatures and delegate to the module-
+level default store. `get_default_store()` builds the default lazily from
+`get_settings()`; `set_default_store(store)` installs a custom one (used
+by `main.create_app` so every app owns its store, and by tests that need
+to install a fake). `reset_default_store()` is the test helper.
 
-Bulk-delete + commit. Returns row count.
+## Config
 
-## `copy_bundle(db, src_pk, dst_pk) -> BundleStats`
-
-Used by both "new version from this one" and cross-skill "clone" flows:
-1. Delete dst's files.
-2. Copy every row from src → dst (same bytes, size, sha256; new `skill_pk`).
-3. Commit.
-
-Cross-skill is the default case from the Web UI's clone page; same-skill
-is the new-version flow. The endpoint wraps this with its own path shape
-— see `routers/bundles.py`.
-
-## `build_targz(db, skill_pk) -> bytes`
-
-Reconstructs a canonical `.tar.gz` from the stored rows. The original
-archive is **not** retained — downloads rebuild on demand. This preserves
-a deterministic, canonical layout regardless of what format the user
-originally uploaded.
+| Env var                           | Default   | Purpose                                             |
+| --------------------------------- | --------- | --------------------------------------------------- |
+| `MCP_BUNDLE_STORE`                | `inline`  | `inline` or `s3`                                    |
+| `MCP_BUNDLE_S3_BUCKET`            | —         | Required when `MCP_BUNDLE_STORE=s3`                 |
+| `MCP_BUNDLE_S3_PREFIX`            | `bundles` | Key prefix; keys become `{prefix}/pk{skill_pk}/…`   |
+| `MCP_BUNDLE_S3_REGION`            | —         | Optional explicit region                            |
+| `MCP_BUNDLE_S3_ENDPOINT_URL`      | —         | Optional; for MinIO / LocalStack / VPC endpoints    |
 
 ## Testing
 
-`tests/test_bundles.py` + `tests/test_api_bundles.py` — 45 tests covering:
-- Format detection for every supported format + garbage input.
-- Each format roundtrips through extract → store → list.
-- Strip-common-prefix opt-in and the no-strip-on-single-file regression.
-- Path traversal, absolute path, symlink, empty archive, bad zip, unsupported format — all rejected.
-- Size / count limits (via `monkeypatch`).
-- `copy_bundle` across same and different skill ids.
-- `build_targz` round-trip.
+- `tests/test_bundles.py` + `tests/test_api_bundles.py` — existing
+  extraction + HTTP tests, now exercising the `InlineBundleStore` path
+  via the module shims.
+- `tests/test_bundle_store_s3.py` — 12 tests against moto-mocked S3:
+  factory behavior, put/read/list/delete/copy round-trips, replace
+  semantics (no orphan S3 objects), `build_targz` rebuild, missing-
+  object-with-row drift, and `set_default_store` wiring.
 
 ## Future work
 
-- Move bytes out of the DB (object store) — `content` becomes a storage key (productization §3.2).
-- Stream uploads instead of reading the whole archive to memory.
-- Hash-based dedup: if two files have the same `sha256`, store content once.
-- Delta versions: instead of re-copying the whole bundle on each new version, store a parent pointer and delta.
-- Sign uploads + verify before accepting (productization §3.1 — bundle content policy).
+- **Migration script** — read every inline row, upload bytes to S3, set
+  `content=b""`. Required before flipping `MCP_BUNDLE_STORE=s3` on an
+  existing deployment.
+- **Streaming uploads / downloads** — current implementation loads the
+  whole archive into memory on upload and materializes the reassembled
+  `.tar.gz` in memory on download. Streaming would reduce peak RSS for
+  large bundles.
+- **Hash-based dedup** — if two files across two skills share a
+  `sha256`, store the content once in S3 and point both rows at it.
+- **Signed URLs** — for large file downloads, return a presigned S3 URL
+  in `GET /skills/…/bundle` instead of streaming through the catalog.
+- **Tiered storage** — auto-tier cold bundles to Glacier / Archive
+  (productization §3.2 P2).

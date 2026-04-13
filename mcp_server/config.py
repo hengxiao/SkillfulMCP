@@ -13,6 +13,11 @@ class Settings:
     database_url: str
     rate_limit_per_minute: int
     max_request_body_mb: int
+    bundle_store: str
+    bundle_s3_bucket: str
+    bundle_s3_prefix: str
+    bundle_s3_region: str
+    bundle_s3_endpoint_url: str
 
     def __init__(self) -> None:
         # Either the legacy single-secret OR a multi-key JSON blob must be
@@ -53,6 +58,17 @@ class Settings:
         self.max_request_body_mb = int(
             os.environ.get("MCP_MAX_REQUEST_BODY_MB", "101")
         )
+        # Bundle storage backend. "inline" keeps bytes in the skill_files
+        # row (default; fine for dev + single-node). "s3" pushes bytes to
+        # an S3-compatible object store, keyed on (skill_pk, path). The
+        # skill_files row is still written in both modes and acts as the
+        # index.
+        self.bundle_store = os.environ.get("MCP_BUNDLE_STORE", "inline").lower()
+        self.bundle_s3_bucket = os.environ.get("MCP_BUNDLE_S3_BUCKET", "")
+        self.bundle_s3_prefix = os.environ.get("MCP_BUNDLE_S3_PREFIX", "bundles").strip("/")
+        self.bundle_s3_region = os.environ.get("MCP_BUNDLE_S3_REGION", "")
+        # Primarily for local dev against MinIO / LocalStack.
+        self.bundle_s3_endpoint_url = os.environ.get("MCP_BUNDLE_S3_ENDPOINT_URL", "")
 
 
 @lru_cache(maxsize=1)

@@ -19,6 +19,11 @@ failure mode on a missing `MCP_JWT_SECRET` is obvious).
 | `database_url`    | `MCP_DATABASE_URL`   | `"sqlite:///./skillful_mcp.db"`    |          |
 | `rate_limit_per_minute` | `MCP_RATE_LIMIT_PER_MINUTE` | `600`                    | Per-IP requests-per-minute. `0` disables the limiter. Tests set it to `0`. |
 | `max_request_body_mb`   | `MCP_MAX_REQUEST_BODY_MB`   | `101`                    | App-level body size cap. Sits above the bundle endpoint's own 100 MB check. |
+| `bundle_store`          | `MCP_BUNDLE_STORE`          | `"inline"`               | `"inline"` (bytes in `skill_files.content`) or `"s3"`. |
+| `bundle_s3_bucket`      | `MCP_BUNDLE_S3_BUCKET`      | —                        | Required when `bundle_store=s3`.                       |
+| `bundle_s3_prefix`      | `MCP_BUNDLE_S3_PREFIX`      | `"bundles"`              | Key prefix; keys become `{prefix}/pk{skill_pk}/…`.    |
+| `bundle_s3_region`      | `MCP_BUNDLE_S3_REGION`      | —                        | Optional explicit region; else boto3 auto-resolves.    |
+| `bundle_s3_endpoint_url`| `MCP_BUNDLE_S3_ENDPOINT_URL`| —                        | Optional; for MinIO / LocalStack / VPC endpoints.      |
 
 ## `get_settings() -> Settings`
 
