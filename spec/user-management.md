@@ -72,8 +72,44 @@ denormalized for two reasons:
    the admin UI — we want to see `"owned by deleted-user@corp.com"`
    rather than an empty cell.
 
-`ondelete="SET NULL"` so deleting a user de-owns their items (admin can
-reassign) instead of cascading-deleting catalog data.
+`ondelete="SET NULL"` at the FK level prevents cascading-deletes of
+catalog data, but we don't actually want orphans. The user-delete
+**handler** runs a reassignment step inside the same transaction before
+the row is removed:
+
+```python
+def delete_user(db, user_id, *, acting_admin_id: str) -> bool:
+    # Reassign the deleted user's owned items to the admin performing
+    # the delete. Keeps a live owner on every row so nothing falls
+    # through the cracks of permission checks.
+    db.query(Skill).filter(Skill.owner_user_id == user_id).update({
+        "owner_user_id": acting_admin_id,
+        "owner_email_snapshot": _email_of(db, acting_admin_id),
+    })
+    db.query(Skillset).filter(Skillset.owner_user_id == user_id).update(...)
+    db.delete(user)
+    db.commit()
+```
+
+The acting admin's id is taken from the session — the HTTP handler
+passes it through, so the service layer never has to guess. Emits a
+structured log line per reassigned row for the audit trail.
+
+Why reassign-to-deleter (rather than NULL + manual cleanup):
+
+- Keeps every catalog row with a live owner at all times. Permission
+  checks stay simple — no special case for "orphan" rows.
+- "You deleted them, you own the mess" is the least surprising
+  default for the admin driving the action. They can transfer
+  ownership onward after the fact using the standard reassign flow
+  (§6.2).
+- Admin-key CLI deletes (no session) fall back to SET NULL. Those
+  rows surface on a new `/users/orphans` admin page so the ops team
+  can sweep them.
+
+The FK stays `ON DELETE SET NULL` as a safety net for the CLI path
+and for any future direct-DB surgery; the handler is the primary
+ownership policy, not the database.
 
 ### 3.2 Semantics
 
@@ -334,6 +370,11 @@ should add ~300 LoC.
   [visibility-and-accounts.md](visibility-and-accounts.md#out-of-scope-call-out-for-clarity).
 - Email invitations when a share is added. Requires SMTP config; ship
   separately (Wave 9.1).
+- Configurable fallback owner (e.g., `MCP_CATALOG_FALLBACK_OWNER_EMAIL`)
+  for the user-delete reassignment. Wave 9 hard-codes "reassign to the
+  acting admin" because that's the least surprising default and avoids
+  another config knob. Add the override if an org complains that their
+  "ops-bot" service account should absorb deletions instead.
 
 ---
 
