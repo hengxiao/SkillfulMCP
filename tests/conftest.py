@@ -5,9 +5,10 @@ Environment variables are set before any mcp_server import so that
 get_settings() (which is lru_cache'd) picks them up on first call.
 """
 
+import json
 import os
 
-# Must be set before importing mcp_server
+# Must be set before importing mcp_server / webui
 os.environ.setdefault("MCP_JWT_SECRET", "test-secret-key-for-testing-only")
 os.environ.setdefault("MCP_ADMIN_KEY", "test-admin-key")
 os.environ.setdefault("MCP_DATABASE_URL", "sqlite:///:memory:")
@@ -15,6 +16,31 @@ os.environ.setdefault("MCP_DATABASE_URL", "sqlite:///:memory:")
 # integration tests never flake. Rate-limit tests in test_rate_limit.py
 # construct their own apps with an explicit limit.
 os.environ.setdefault("MCP_RATE_LIMIT_PER_MINUTE", "0")
+
+# ---------------------------------------------------------------------------
+# Web UI (Wave 6a) — session secret + one preconfigured test operator.
+# CSRF is disabled for the default client fixture so existing HTTP-shape
+# tests don't have to thread tokens through every POST; dedicated CSRF
+# tests in test_webui_auth.py construct their own CSRF-enabled app.
+# ---------------------------------------------------------------------------
+
+os.environ.setdefault("MCP_WEBUI_SESSION_SECRET", "test-session-secret-please-change")
+os.environ.setdefault("MCP_WEBUI_CSRF_ENABLED", "0")
+
+# Build a bcrypt-hashed test operator on the fly so tests don't pin a
+# frozen hash. Safe to call at import time; bcrypt is a dev dep.
+if "MCP_WEBUI_OPERATORS" not in os.environ:
+    # Deferred import so env above is in place before webui reads config.
+    from webui.auth import hash_password
+    TEST_OPERATOR_EMAIL = "test@example.com"
+    TEST_OPERATOR_PASSWORD = "test-password"
+    os.environ["MCP_WEBUI_OPERATORS"] = json.dumps([{
+        "email": TEST_OPERATOR_EMAIL,
+        "password_hash": hash_password(TEST_OPERATOR_PASSWORD),
+    }])
+else:
+    TEST_OPERATOR_EMAIL = "test@example.com"
+    TEST_OPERATOR_PASSWORD = "test-password"
 
 import pytest
 from fastapi.testclient import TestClient

@@ -24,6 +24,12 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "alembic>=1.13",
+    # Web UI operator password hashing (Wave 6a). `bcrypt` directly —
+    # passlib 1.7 has a known compat issue with bcrypt 5.x.
+    "bcrypt>=4.0",
+    # Signed session cookie storage. Pinned explicitly so installs don't
+    # rely on starlette's transitive dep.
+    "itsdangerous>=2.2",
 ]
 
 [project.optional-dependencies]

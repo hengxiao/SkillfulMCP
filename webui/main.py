@@ -15,12 +15,27 @@ from typing import Annotated
 from urllib.parse import quote
 
 import uvicorn
-from fastapi import FastAPI, File, Form, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
+from .auth import (
+    Operator,
+    authenticate,
+    clear_session,
+    get_csrf_token,
+    get_session_operator,
+    set_session_operator,
+)
 from .client import MCPClient, MCPError
 from .config import get_settings
+from .middleware import AuthMiddleware, csrf_required
+
+
+# Shorthand so every mutating route can declare `dependencies=CSRF` and
+# stay readable. Each POST/PUT/DELETE handler below uses it.
+CSRF: list = [Depends(csrf_required)]
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -51,6 +66,11 @@ def _redirect(path: str, msg: str = "", msg_type: str = "success") -> RedirectRe
 
 
 def _render(request: Request, template: str, ctx: dict) -> HTMLResponse:
+    # Session-bound CSRF token + current operator are available in every
+    # template without each handler having to remember. Handlers can still
+    # override via `ctx` if they really need to.
+    ctx.setdefault("csrf_token", get_csrf_token(request))
+    ctx.setdefault("operator", get_session_operator(request))
     return templates.TemplateResponse(request, template, ctx)
 
 
@@ -64,6 +84,76 @@ def _flash_ctx(msg: str, msg_type: str) -> dict:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="SkillfulMCP Web UI", docs_url=None, redoc_url=None)
+
+    # ------------------------------------------------------------------ #
+    # Middleware stack                                                    #
+    # ------------------------------------------------------------------ #
+    # `add_middleware` prepends to the stack, so the last-added is the
+    # outermost and runs first on ingress. Order on the way in:
+    #   SessionMiddleware → AuthMiddleware → CSRFMiddleware → handler
+    settings = get_settings()
+    if not settings.session_secret:
+        raise RuntimeError(
+            "MCP_WEBUI_SESSION_SECRET must be set. Generate one with: "
+            "python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+
+    # CSRF is NOT a middleware — it's a FastAPI dep applied per route (see
+    # `CSRF` list at module top). BaseHTTPMiddleware can't read the body
+    # without breaking downstream `Form()` deps.
+    app.add_middleware(AuthMiddleware)
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.session_secret,
+        same_site="lax",
+        https_only=False,  # flipped by ops behind an HTTPS reverse proxy
+    )
+
+    # ------------------------------------------------------------------ #
+    # Login / logout                                                      #
+    # ------------------------------------------------------------------ #
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request, next: str = "/", error: str = ""):
+        # Pre-populate the CSRF token so the login form has a valid one
+        # even without a prior session.
+        return _render(request, "login.html", {
+            "error": error,
+            "next": next,
+        })
+
+    @app.post("/login")
+    async def login_submit(
+        request: Request,
+        email: Annotated[str, Form()],
+        password: Annotated[str, Form()],
+        csrf_token: Annotated[str, Form()] = "",
+        next: Annotated[str, Form()] = "/",
+    ):
+        # CSRF on /login is enforced here (not in the middleware — see
+        # CSRFMiddleware docstring for why it's exempt).
+        from .auth import verify_csrf
+        if settings.csrf_enabled and not verify_csrf(request, csrf_token):
+            return _render(request, "login.html", {
+                "error": "Your login form expired. Please try again.",
+                "next": next,
+            })
+
+        op = authenticate(email, password)
+        if op is None:
+            return _render(request, "login.html", {
+                "error": "Invalid email or password.",
+                "next": next,
+            })
+        set_session_operator(request, op)
+        # Only redirect to internal paths to avoid open-redirect abuse.
+        safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+        return RedirectResponse(safe_next, status_code=303)
+
+    @app.post("/logout", dependencies=CSRF)
+    async def logout(request: Request):
+        clear_session(request)
+        return RedirectResponse("/login", status_code=303)
 
     # ------------------------------------------------------------------ #
     # Dashboard                                                           #
@@ -126,7 +216,7 @@ def create_app() -> FastAPI:
             "member_skills": member_skills,
         })
 
-    @app.post("/skillsets")
+    @app.post("/skillsets", dependencies=CSRF)
     async def create_skillset(
         id: Annotated[str, Form()],
         name: Annotated[str, Form()],
@@ -170,7 +260,7 @@ def create_app() -> FastAPI:
             **_flash_ctx(msg, msg_type),
         })
 
-    @app.post("/skillsets/{skillset_id}/update")
+    @app.post("/skillsets/{skillset_id}/update", dependencies=CSRF)
     async def update_skillset(
         skillset_id: str,
         name: Annotated[str, Form()],
@@ -184,7 +274,7 @@ def create_app() -> FastAPI:
         except MCPError as exc:
             return _redirect(f"/skillsets/{skillset_id}", str(exc), "error")
 
-    @app.delete("/skillsets/{skillset_id}")
+    @app.delete("/skillsets/{skillset_id}", dependencies=CSRF)
     async def delete_skillset(skillset_id: str):
         try:
             await get_client().delete_skillset(skillset_id)
@@ -192,7 +282,7 @@ def create_app() -> FastAPI:
         except MCPError:
             return Response(status_code=500)
 
-    @app.post("/skillsets/{skillset_id}/skills")
+    @app.post("/skillsets/{skillset_id}/skills", dependencies=CSRF)
     async def associate_skill(
         skillset_id: str,
         skill_id: Annotated[str, Form()],
@@ -203,7 +293,7 @@ def create_app() -> FastAPI:
         except MCPError as exc:
             return _redirect(f"/skillsets/{skillset_id}", str(exc), "error")
 
-    @app.delete("/skillsets/{skillset_id}/skills/{skill_id}")
+    @app.delete("/skillsets/{skillset_id}/skills/{skill_id}", dependencies=CSRF)
     async def disassociate_skill(skillset_id: str, skill_id: str):
         try:
             await get_client().disassociate_skill(skillset_id, skill_id)
@@ -268,7 +358,7 @@ def create_app() -> FastAPI:
             "metadata_json": json.dumps(skill.get("metadata") or {}, indent=2),
         })
 
-    @app.post("/skills")
+    @app.post("/skills", dependencies=CSRF)
     async def create_skill(
         id: Annotated[str, Form()],
         name: Annotated[str, Form()],
@@ -374,7 +464,7 @@ def create_app() -> FastAPI:
             **_flash_ctx("", "success"),
         })
 
-    @app.post("/skills/{skill_id}/clone")
+    @app.post("/skills/{skill_id}/clone", dependencies=CSRF)
     async def clone_skill(
         skill_id: str,
         new_id: Annotated[str, Form()],
@@ -478,7 +568,7 @@ def create_app() -> FastAPI:
             **_flash_ctx("", "success"),
         })
 
-    @app.post("/skills/{skill_id}/new-version")
+    @app.post("/skills/{skill_id}/new-version", dependencies=CSRF)
     async def create_new_version(
         skill_id: str,
         version: Annotated[str, Form()],
@@ -552,7 +642,7 @@ def create_app() -> FastAPI:
         # 'none' — leave the new version bundle-less.
         return _redirect(dest, f"Version {version} created (no bundle).")
 
-    @app.delete("/skills/{skill_id}")
+    @app.delete("/skills/{skill_id}", dependencies=CSRF)
     async def delete_skill(skill_id: str):
         try:
             await get_client().delete_skill(skill_id)
@@ -560,7 +650,7 @@ def create_app() -> FastAPI:
         except MCPError:
             return Response(status_code=500)
 
-    @app.delete("/skills/{skill_id}/versions/{version:path}")
+    @app.delete("/skills/{skill_id}/versions/{version:path}", dependencies=CSRF)
     async def delete_skill_version(skill_id: str, version: str):
         try:
             await get_client().delete_skill(skill_id, version=version)

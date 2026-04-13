@@ -65,8 +65,30 @@ def fake_mcp(monkeypatch):
 
 @pytest.fixture()
 def webui(fake_mcp):
+    """Authenticated Web UI TestClient.
+
+    Builds the app, logs in the test operator, and yields the client with
+    the session cookie attached. CSRF is disabled in the default test env
+    (see conftest.py) so these tests don't have to thread tokens through
+    every POST — the dedicated CSRF suite in test_webui_auth.py covers
+    that separately.
+    """
+    from tests.conftest import TEST_OPERATOR_EMAIL, TEST_OPERATOR_PASSWORD
     app = create_app()
     with TestClient(app) as c:
+        r = c.post(
+            "/login",
+            data={
+                "email": TEST_OPERATOR_EMAIL,
+                "password": TEST_OPERATOR_PASSWORD,
+                "csrf_token": "",  # CSRF off in test env
+                "next": "/",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 303, (
+            f"login fixture failed: {r.status_code} {r.text[:200]}"
+        )
         yield c, fake_mcp
 
 

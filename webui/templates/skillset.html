@@ -24,6 +24,7 @@
       </div>
       <div class="card-body">
         <form method="post" action="/skillsets/{{ skillset.id }}/update">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="mb-3">
             <label class="form-label fw-semibold">ID</label>
             <input type="text" class="form-control font-monospace bg-light" value="{{ skillset.id }}" disabled>
@@ -120,6 +121,7 @@
       <div class="card-body">
         {% if available_skills %}
         <form method="post" action="/skillsets/{{ skillset.id }}/skills" class="row g-2 align-items-end">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="col">
             <label class="form-label fw-semibold">Skill</label>
             <select name="skill_id" class="form-select" required>

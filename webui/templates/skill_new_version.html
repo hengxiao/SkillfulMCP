@@ -24,6 +24,7 @@
       action="/skills/{{ source.id }}/new-version"
       enctype="multipart/form-data"
       class="card border-0 shadow-sm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="from_version" value="{{ source.version }}">
   <div class="card-body">
 

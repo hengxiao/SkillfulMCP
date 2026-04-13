@@ -11,6 +11,7 @@ implementation details.
 | `main.py`                    | [main.md](main.md)                         | App factory, all routes, redirect helper          |
 | `client.py`                  | [client.md](client.md)                     | Async httpx wrapper around the MCP catalog API    |
 | `config.py`                  | [config.md](config.md)                     | Settings from env                                 |
+| `auth.py` + `middleware.py`  | [auth.md](auth.md)                         | Operator auth, sessions, CSRF (Wave 6a)           |
 | `templates/`                 | [templates.md](templates.md)               | Jinja templates (pages + partials)                |
 
 ## Conventions

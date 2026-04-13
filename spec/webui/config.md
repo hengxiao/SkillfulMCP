@@ -7,10 +7,13 @@ as the catalog server.
 
 | Attribute       | Env var           | Default                   |
 | --------------- | ----------------- | ------------------------- |
-| `mcp_server_url`| `MCP_SERVER_URL`  | `http://localhost:8000`   |
-| `admin_key`     | `MCP_ADMIN_KEY`   | `""`                      |
-| `host`          | `WEBUI_HOST`      | `127.0.0.1`               |
-| `port`          | `WEBUI_PORT`      | `8080`                    |
+| `mcp_server_url`| `MCP_SERVER_URL`           | `http://localhost:8000`    |
+| `admin_key`     | `MCP_ADMIN_KEY`            | `""`                       |
+| `host`          | `WEBUI_HOST`               | `127.0.0.1`                |
+| `port`          | `WEBUI_PORT`               | `8080`                     |
+| `session_secret`| `MCP_WEBUI_SESSION_SECRET` | — (required on startup)    |
+| `operators_raw` | `MCP_WEBUI_OPERATORS`      | `""` (JSON list)           |
+| `csrf_enabled`  | `MCP_WEBUI_CSRF_ENABLED`   | `"1"` (`"0"` disables)     |
 
 `get_settings()` is `@lru_cache`d so tests that mutate env vars between
 cases must reset the cache.

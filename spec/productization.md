@@ -74,10 +74,16 @@ imagine running it in production.
 
 - **`MCPClient` in the Web UI uses the admin key for everything**, so the
   UI has full god-mode against any server it can reach. OK for a local
-  operator; unacceptable as a hosted console.
-- **No CSRF protection** on the state-changing POSTs (the UI and API share
-  an origin but there's no token).
-- **No session concept.** Any operator who opens the UI *is* the admin.
+  operator; unacceptable as a hosted console. Wave 6a adds operator-
+  facing auth at the Web UI edge; the Web UI still uses the admin key to
+  talk to the catalog. Replacing that inter-service trust boundary with
+  operator-forwarded bearer tokens is a future wave.
+- **~~No CSRF protection~~** **Addressed in Wave 6a.** `csrf_required`
+  FastAPI dep on every state-changing endpoint; HTMX global hook sets
+  `X-CSRF-Token` automatically.
+- **~~No session concept.~~** **Addressed in Wave 6a.** Starlette
+  `SessionMiddleware` (signed cookies) + an operator registry
+  (password-hashed via bcrypt). OIDC + role-scoped operators are Wave 6b.
 - **Error handling exposes raw MCP error strings** which may contain paths,
   internal ids, or stack traces.
 
@@ -161,11 +167,15 @@ order.
   and agent row gets a `tenant_id` FK. All catalog endpoints filter by
   the caller's tenant. Deliverable: migration + a `Depends(get_tenant)`
   that resolves from either OIDC claims (operators) or JWT claims (agents).
-- **[P0] Replace the shared admin key with operator accounts.** Operators
-  authenticate via OIDC (Auth0, Cognito, Clerk, or self-hosted Keycloak).
-  Roles: `tenant_admin`, `catalog_editor`, `read_only`. Deliverable: middleware
-  that accepts an OIDC id token, validates `iss`/`aud`/`exp`, maps claims to
-  roles, and populates `request.state.operator`.
+- **[P0 — partially SHIPPED] Replace the shared admin key with operator
+  accounts.** **Wave 6a** added password-based local operators for the
+  Web UI (bcrypt hashes, `MCP_WEBUI_OPERATORS` JSON), session cookies
+  (Starlette `SessionMiddleware`), `AuthMiddleware` redirect, and CSRF
+  protection (`csrf_required` FastAPI dep + HTMX global hook). The full
+  picture still needs: **(a)** OIDC provider integration (Wave 6b),
+  **(b)** tenant-scoped roles (`tenant_admin`, `catalog_editor`,
+  `read_only`), **(c)** replacing the Web-UI-to-catalog admin key with
+  operator-forwarded bearer tokens.
 - **[P0] Move `POST /token` behind an operator session + policy.** Only a
   `tenant_admin` can mint tokens for agents in their tenant, and only with
   a bounded `expires_in`. **Bounded `expires_in` SHIPPED in Wave 4** via
@@ -276,11 +286,18 @@ order.
 
 ### 3.5 Web UI
 
-- **[P0] Replace admin-key with operator session.** Login via OIDC;
-  session cookie with `HttpOnly; Secure; SameSite=Lax`. All API calls
-  forward the operator's bearer, not a shared admin key.
-- **[P0] CSRF tokens** on every POST/PUT/DELETE form. Submitted via
-  hidden input or `X-CSRF-Token` header.
+- **[P0 — partially SHIPPED] Replace admin-key with operator session.**
+  **Wave 6a** shipped password-based local operators, signed session
+  cookies (`SameSite=Lax`, HttpOnly via Starlette default), and the
+  `AuthMiddleware` redirect-to-login flow. Remaining: **(a)** OIDC login
+  path (Wave 6b), **(b)** forward the operator's credential to the
+  catalog instead of a shared admin key (requires the catalog to also
+  accept operator sessions; see §3.1).
+- **[P0 — SHIPPED] CSRF tokens.** `csrf_required` FastAPI dep on every
+  state-changing endpoint. HTMX global hook sets `X-CSRF-Token` on every
+  non-GET request; standard HTML forms carry a hidden `csrf_token`
+  input injected by the template context. Toggleable via
+  `MCP_WEBUI_CSRF_ENABLED`.
 - **[P1] Row-level permission checks** in the UI so editors in tenant A
   never see tenant B's skills even if they guess the URL.
 - **[P2] Audit log view.** Per-tenant UI for recent mutations.
