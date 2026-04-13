@@ -248,6 +248,127 @@ class TestPendingMemberships:
 # Bootstrap the default account
 # ---------------------------------------------------------------------------
 
+class TestAccountCRUDEdges:
+    def test_get_by_name_and_get_by_id(self, db_session):
+        u = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="Named", initial_admin_user_id=u.id
+        )
+        assert acct_svc.get_account_by_name(db_session, "Named").id == a.id
+        assert acct_svc.get_account_by_name(db_session, "does-not") is None
+        assert acct_svc.get_account(db_session, a.id).name == "Named"
+        assert acct_svc.get_account(db_session, "ghost") is None
+
+    def test_empty_name_rejected(self, db_session):
+        u = _mk_user(db_session, "admin@x.com")
+        with pytest.raises(ValueError, match="required"):
+            acct_svc.create_account(
+                db_session, name="   ", initial_admin_user_id=u.id
+            )
+
+    def test_delete_account_removes_memberships_by_cascade(self, db_session):
+        admin = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="GoAway", initial_admin_user_id=admin.id
+        )
+        # Membership exists now.
+        assert len(acct_svc.list_memberships(db_session, a.id)) == 1
+        assert acct_svc.delete_account(db_session, a.id) is True
+        # Membership is gone via FK CASCADE.
+        assert acct_svc.list_memberships(db_session, a.id) == []
+        # Service returns False when asked to delete a missing row.
+        assert acct_svc.delete_account(db_session, a.id) is False
+
+
+class TestPendingEdges:
+    def test_unknown_account_rejected(self, db_session):
+        with pytest.raises(ValueError, match="does not exist"):
+            acct_svc.add_pending_membership(
+                db_session, account_id="no-such",
+                email="x@y.com", role="viewer",
+            )
+
+    def test_empty_email_rejected(self, db_session):
+        u = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="Zero", initial_admin_user_id=u.id
+        )
+        with pytest.raises(ValueError, match="email is required"):
+            acct_svc.add_pending_membership(
+                db_session, account_id=a.id, email="  ", role="viewer",
+            )
+
+    def test_list_for_email_empty(self, db_session):
+        assert acct_svc.list_pending_for_email(db_session, "") == []
+        assert acct_svc.list_pending_for_email(db_session, "nobody@x.com") == []
+
+    def test_delete_pending(self, db_session):
+        admin = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="DelMe", initial_admin_user_id=admin.id
+        )
+        p = acct_svc.add_pending_membership(
+            db_session, account_id=a.id, email="x@y.com", role="viewer"
+        )
+        assert acct_svc.delete_pending_membership(db_session, p.id) is True
+        assert acct_svc.delete_pending_membership(db_session, p.id) is False
+
+
+class TestMembershipRoleUpdate:
+    def test_noop_on_same_role(self, db_session):
+        admin = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="NoOp", initial_admin_user_id=admin.id
+        )
+        bob = _mk_user(db_session, "bob@x.com")
+        acct_svc.add_membership(
+            db_session, account_id=a.id, user_id=bob.id, role="viewer"
+        )
+        # Same role → no change, returns the row.
+        m = acct_svc.update_membership_role(
+            db_session, account_id=a.id, user_id=bob.id, new_role="viewer"
+        )
+        assert m.role == "viewer"
+
+    def test_unknown_membership_rejected(self, db_session):
+        admin = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="Ghost", initial_admin_user_id=admin.id
+        )
+        with pytest.raises(ValueError, match="no membership"):
+            acct_svc.update_membership_role(
+                db_session, account_id=a.id, user_id="nobody", new_role="viewer",
+            )
+
+    def test_invalid_role_rejected(self, db_session):
+        admin = _mk_user(db_session, "admin@x.com")
+        a = acct_svc.create_account(
+            db_session, name="Bad", initial_admin_user_id=admin.id
+        )
+        with pytest.raises(ValueError, match="role must be one of"):
+            acct_svc.update_membership_role(
+                db_session, account_id=a.id, user_id=admin.id, new_role="tyrant",
+            )
+
+    def test_list_for_user_covers_all_accounts(self, db_session):
+        """A user with memberships in two accounts should appear in
+        list_memberships_for_user with both rows."""
+        alice = _mk_user(db_session, "alice@x.com")
+        bob = _mk_user(db_session, "bob@x.com")
+        a1 = acct_svc.create_account(
+            db_session, name="A1", initial_admin_user_id=alice.id
+        )
+        a2 = acct_svc.create_account(
+            db_session, name="A2", initial_admin_user_id=bob.id
+        )
+        acct_svc.add_membership(
+            db_session, account_id=a2.id, user_id=alice.id, role="contributor"
+        )
+        alice_mems = acct_svc.list_memberships_for_user(db_session, alice.id)
+        roles = {m.account_id: m.role for m in alice_mems}
+        assert roles == {a1.id: "account-admin", a2.id: "contributor"}
+
+
 class TestBootstrapDefault:
     def test_creates_default_and_attaches_existing_users(self, db_session):
         _mk_user(db_session, "a@x.com")

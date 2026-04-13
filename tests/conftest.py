@@ -106,12 +106,28 @@ JWT_SECRET = "test-secret-key-for-testing-only"
 
 @pytest.fixture()
 def db_session():
-    """In-memory SQLite session for direct service-layer tests."""
+    """In-memory SQLite session for direct service-layer tests.
+
+    Mirrors the production engine's FK-enforcement pragma so CASCADE
+    / RESTRICT behavior matches what we'd see in Postgres. Without
+    the pragma, SQLite silently ignores `ondelete=CASCADE` and tests
+    that depend on cascade behavior would pass in CI but fail in
+    prod.
+    """
+    from sqlalchemy import event
+
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_fk(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()

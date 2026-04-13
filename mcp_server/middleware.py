@@ -62,7 +62,14 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                     "latency_ms": round(latency_ms, 2),
                 },
             )
-            set_request_id(None)
+            # DO NOT clear the contextvar here — the exception propagates
+            # up to Starlette's ExceptionMiddleware which then invokes our
+            # `unhandled_exception_handler`. That handler calls
+            # `get_request_id()` to stamp the envelope + `X-Request-ID`
+            # response header. Clearing the var at this point would mean
+            # the 500 response carries no request id, breaking the
+            # end-to-end forensics trail. The context is task-scoped so
+            # leaving it set here is safe.
             raise
 
         latency_ms = (time.perf_counter() - start) * 1000
