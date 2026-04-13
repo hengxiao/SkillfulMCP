@@ -16,12 +16,26 @@ Web UI. Shipped in Wave 6a.
 ## What this wave does **not** do (Wave 6b)
 
 - OIDC / SAML / external identity providers.
-- Tenant-scoped roles (`tenant_admin`, `catalog_editor`, `read_only`).
+- Tenant-scoped roles.
 - Operator CRUD UI or DB-backed operator store.
 - Per-operator audit log.
 
 Password flow exercises the full session + CSRF + auth-middleware
 pipeline; swapping the credential source is a localized change later.
+
+## What later waves added / plan to add
+
+- **Wave 8b — shipped.** DB-backed operator store (`users` table),
+  flat `admin` / `viewer` roles, CRUD UI at `/users`, self-service
+  password change at `/account`. See
+  [visibility-and-accounts.md](../visibility-and-accounts.md#wave-8b-users--roles--shipped).
+- **Wave 9 — proposed.** Replaces the flat role set with an
+  **account-based** tenant model: platform-level `superadmin` +
+  per-account `account-admin` + `contributor` + `viewer`. Every
+  non-superadmin user belongs to exactly one account; the
+  account-admin is the only non-superadmin who manages users inside
+  it. Adds email-based allow lists for cross-account sharing. See
+  [user-management.md](../user-management.md).
 
 ## Operator config
 
@@ -201,11 +215,17 @@ otherwise.
 - **OIDC** — add `/auth/oidc/login` + `/auth/oidc/callback`; use `authlib`
   for the handshake; keep the session cookie shape unchanged so this
   becomes a new login entry point rather than a rewrite.
-- **Roles + tenants** — add `role` and `tenant_id` to the session-stored
-  operator; add role-gating dep (`require_role("admin")`) applied to the
-  mutating dependency list alongside CSRF.
-- **DB-backed operator store** — drop the env JSON when operators are
-  more than a handful; add a CRUD UI.
+- **Roles — SHIPPED (Wave 8b) / EXTENDED (Wave 9 proposal).** The
+  flat `admin` / `viewer` split shipped in Wave 8b; `require_role` is
+  live. Wave 9 turns the role set into an account-based tenant model
+  with `superadmin` (platform, singleton) + `account-admin`
+  (per-account) + `contributor` + `viewer`. See
+  [user-management.md](../user-management.md).
+- **Tenant isolation — proposed (Wave 9).** Wave 9's `accounts`
+  table is the tenant boundary; every non-superadmin user carries an
+  `account_id` on their session.
+- **DB-backed operator store — SHIPPED (Wave 8b).** Env JSON is now
+  bootstrap-only; the `users` table is the source of truth.
 - **Rate-limit `/login`** — currently unguarded; the catalog's
   `RateLimitMiddleware` only protects the catalog process. Add per-IP
   login throttling here.

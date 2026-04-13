@@ -255,17 +255,7 @@ GET    /skills/{id}/versions/{ver}/files/{path}  JWT, fetch one file
 GET    /skills/{id}/versions/{ver}/bundle        JWT, download reconstructed .tar.gz
 
 GET    /agents, GET/POST/PUT/DELETE /agents/{id}   admin
-GET    /skillsets, etc.                            admin (writes); GET /{id}/skills is JWT
-PUT    /skillsets/{id}/skills/{skill_id}          admin, associate
-DELETE /skillsets/{id}/skills/{skill_id}          admin, disassociate
 
-GET    /admin/skills[?version=]                   admin-key read (Web UI path)
-GET    /admin/skills/{id}/versions
-GET    /admin/skills/{id}/versions/{ver}/files[/{path}]
-GET    /admin/skillsets/{id}/skills
-POST   /admin/tokens/revoke                       admin, body {"jti": "..."}
-GET    /admin/tokens/revoked-count                admin, dashboards
-```
 
 ---
 
@@ -300,7 +290,12 @@ hook). All data operations go through the MCP catalog API — the UI
 proxies with the configured admin key.
 
 Full spec: [`spec/webui.md`](spec/webui.md) +
-[`spec/webui/`](spec/webui/).
+[`spec/webui/`](spec/webui/). Next-wave plan for owner-based skill
+management, email allow lists, and per-account tenant isolation:
+[`spec/user-management.md`](spec/user-management.md) (introduces an
+`accounts` table plus `superadmin` / `account-admin` / `contributor`
+/ `viewer` roles, extending the current flat `admin` / `viewer`
+model).
 
 ---
 

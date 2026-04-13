@@ -176,16 +176,22 @@ order.
   accounts.** **Wave 6a** added password-based local operators for the
   Web UI (bcrypt hashes, `MCP_WEBUI_OPERATORS` JSON), session cookies
   (Starlette `SessionMiddleware`), `AuthMiddleware` redirect, and CSRF
-  protection (`csrf_required` FastAPI dep + HTMX global hook). The full
-  picture still needs: **(a)** OIDC provider integration (Wave 6b),
-  **(b)** tenant-scoped roles (`tenant_admin`, `catalog_editor`,
-  `read_only`), **(c)** replacing the Web-UI-to-catalog admin key with
-  operator-forwarded bearer tokens.
-- **[P0] Move `POST /token` behind an operator session + policy.** Only a
-  `tenant_admin` can mint tokens for agents in their tenant, and only with
-  a bounded `expires_in`. **Bounded `expires_in` SHIPPED in Wave 4** via
-  `MCP_MAX_TOKEN_LIFETIME_SECONDS` (default 24h); server-side clamps every
-  mint. Operator-session gating still TODO (waits for OIDC).
+  protection (`csrf_required` FastAPI dep + HTMX global hook).
+  **Wave 8b** moved operators to a `users` table with flat
+  `admin` / `viewer` roles + CRUD UI. **Wave 9 (proposed, see
+  [user-management.md](user-management.md))** introduces an
+  `accounts` table + account-scoped roles (`superadmin` /
+  `account-admin` / `contributor` / `viewer`), which subsumes the
+  earlier placeholder naming of `tenant_admin` / `catalog_editor` /
+  `read_only`. The full picture still needs: **(a)** OIDC provider
+  integration (Wave 6b), **(b)** replacing the Web-UI-to-catalog
+  admin key with operator-forwarded bearer tokens.
+- **[P0] Move `POST /token` behind an operator session + policy.** Only
+  an `account-admin` can mint tokens for agents in their account, and
+  only with a bounded `expires_in`. **Bounded `expires_in` SHIPPED in
+  Wave 4** via `MCP_MAX_TOKEN_LIFETIME_SECONDS` (default 24h);
+  server-side clamps every mint. Operator-session gating still TODO
+  (waits for the Wave 9 account model + OIDC).
 - **[P1 — SHIPPED (in-process)] Token revocation list.** Every issued
   token now carries a `jti`. `mcp_server/revocation.RevocationList` is an
   in-process, thread-safe deny list with lazy TTL purge. Admin endpoint

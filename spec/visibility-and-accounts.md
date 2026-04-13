@@ -91,15 +91,24 @@ JWT (we don't open up unauthenticated reads here; that's a future flag).
 
 ### Target
 
-Two roles in Wave 8b (intermediate; productization §3.1 will add more):
+Two roles in Wave 8b (intermediate model — **superseded by Wave 9's
+account-scoped roles** spec'd in [user-management.md](user-management.md)):
 
 - **`admin`** — full privileges. Can manage users, manage all
   skills/skillsets/agents, mint tokens for any agent.
 - **`viewer`** — read-only across all UI pages. No mutating actions
   rendered.
 
-A future wave adds `editor` (manage catalog content, can't manage users)
-when the operator org gets large enough to need the split.
+Wave 9 replaces this flat pool with an **account-based** tenant model:
+a platform-level `superadmin` (singleton) + per-account
+`account-admin` + `contributor` + `viewer`. Every user except the
+superadmin belongs to exactly one **account**, and the account-admin
+is the only non-superadmin who can create or delete users in it. The
+Wave 8b `admin` and `viewer` rows migrate into Wave 9 per
+[user-management.md §2.2](user-management.md#22-transition-from-wave-8b):
+the oldest `admin` becomes `superadmin`; the rest each become an
+`account-admin` of a fresh account named `"{email}'s team"`; every
+`viewer` lands in a `default` account as a `viewer`.
 
 ### Schema (Wave 8b)
 
