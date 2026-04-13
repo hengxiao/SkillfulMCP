@@ -426,3 +426,27 @@ class SignupResponse(BaseModel):
 
 class DisableUserRequest(BaseModel):
     disabled: bool
+
+
+# ---------------------------------------------------------------------------
+# Sharing schemas (Wave 9.4)
+# ---------------------------------------------------------------------------
+
+class ShareCreateRequest(BaseModel):
+    """Body for POST /skills/{id}/shares + skillset parallel.
+
+    Email normalization + regex validation happens in the service
+    layer so the schema accepts raw input; the service surfaces a
+    400 with a specific message.
+    """
+
+    email: str
+
+
+class ShareResponse(BaseModel):
+    id: int
+    email: str
+    granted_by_user_id: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

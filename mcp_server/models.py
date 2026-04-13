@@ -287,6 +287,63 @@ class PendingMembership(Base):
     )
 
 
+class SkillShare(Base):
+    """Email-keyed allow-list entry for a skill (Wave 9.4).
+
+    `skill_id` is the logical skill id (shared across versions).
+    `email` is normalized (``.strip().lower()``) before insert. No FK
+    from `email` to `users.email` on purpose — shares for
+    not-yet-registered emails must persist until signup resolves
+    them.
+    """
+
+    __tablename__ = "skill_shares"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "email",
+                         name="uq_skill_shares_skill_email"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skill_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    granted_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SkillsetShare(Base):
+    """Email-keyed allow-list entry for a skillset. Parallel to
+    :class:`SkillShare`."""
+
+    __tablename__ = "skillset_shares"
+    __table_args__ = (
+        UniqueConstraint("skillset_id", "email",
+                         name="uq_skillset_shares_skillset_email"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skillset_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("skillsets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    granted_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
