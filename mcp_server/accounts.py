@@ -206,8 +206,17 @@ def remove_membership(
     *,
     account_id: str,
     user_id: str,
+    new_owner_id: str | None = None,
 ) -> bool:
     """Remove a membership. Enforces the last-admin guard under row lock.
+
+    Wave 9.6: when `new_owner_id` is supplied, every catalog row in
+    this account currently owned by the departing user is reassigned
+    to the target. If the target currently holds a `viewer`
+    membership, they're auto-promoted to `contributor` so they can
+    actually own the inherited rows (viewers cannot own). Promotion
+    to `account-admin` is NEVER auto — that stays an explicit
+    operator action.
 
     Returns True if a row was deleted, False if the membership didn't
     exist. Raises LastAdminError if removal would strand the account.
@@ -237,9 +246,144 @@ def remove_membership(
                 "Promote another member first, or delete the account."
             )
 
+    # Wave 9.6 — reassignment + auto-promotion.
+    if new_owner_id:
+        _reassign_owned_rows(
+            db, account_id=account_id,
+            from_user_id=user_id, to_user_id=new_owner_id,
+        )
+
     db.delete(row)
     db.commit()
     return True
+
+
+def _reassign_owned_rows(
+    db: Session, *, account_id: str, from_user_id: str, to_user_id: str
+) -> None:
+    """Move every skill / skillset / agent owned by `from_user_id` in
+    `account_id` onto `to_user_id`. Auto-promotes `to_user_id` from
+    viewer → contributor if any rows are actually transferred (viewers
+    cannot own).
+
+    Emits a structured `user.promoted` log line on the promotion path
+    with `reason="inheritance"` so the audit trail captures the role
+    change operators didn't click for explicitly.
+    """
+    from .models import Agent, Skill, Skillset
+
+    # Count what's being transferred up-front so we know whether to
+    # promote the target even if one of the tables is empty.
+    transferring_rows = 0
+    for cls in (Skill, Skillset, Agent):
+        transferring_rows += (
+            db.query(cls)
+            .filter(
+                cls.account_id == account_id,
+                cls.owner_user_id == from_user_id,
+            )
+            .count()
+        )
+
+    if transferring_rows == 0:
+        return
+
+    # Fetch the target's member row + email snapshot for denorm.
+    target_membership = get_membership(
+        db, account_id=account_id, user_id=to_user_id
+    )
+    if target_membership is None:
+        raise ValueError(
+            f"reassign target {to_user_id!r} is not a member of "
+            f"account {account_id!r}"
+        )
+    target_user = db.get(User, to_user_id)
+    target_email = target_user.email if target_user else None
+
+    for cls in (Skill, Skillset, Agent):
+        db.query(cls).filter(
+            cls.account_id == account_id,
+            cls.owner_user_id == from_user_id,
+        ).update({
+            "owner_user_id": to_user_id,
+            "owner_email_snapshot": target_email,
+        })
+
+    # Auto-promote viewer → contributor.
+    if target_membership.role == "viewer":
+        target_membership.role = "contributor"
+        db.flush()
+        _log.info(
+            "user.promoted",
+            extra={
+                "user_id": to_user_id,
+                "account_id": account_id,
+                "from_role": "viewer",
+                "to_role": "contributor",
+                "reason": "inheritance",
+                "transferred_rows": transferring_rows,
+            },
+        )
+
+
+def describe_removal(
+    db: Session, *, account_id: str, user_id: str
+) -> dict:
+    """Return a preview payload for the membership-removal dialog.
+
+    Shape (all counts are within the target account):
+      {
+        "owns_skills": int,
+        "owns_skillsets": int,
+        "owns_agents": int,
+        "default_target": {user_id, email, role} | None,
+        "target_members": [{user_id, email, role}, ...]   # dropdown
+      }
+    """
+    from .models import Agent, Skill, Skillset
+
+    counts = {
+        "owns_skills": db.query(Skill).filter(
+            Skill.account_id == account_id,
+            Skill.owner_user_id == user_id,
+        ).count(),
+        "owns_skillsets": db.query(Skillset).filter(
+            Skillset.account_id == account_id,
+            Skillset.owner_user_id == user_id,
+        ).count(),
+        "owns_agents": db.query(Agent).filter(
+            Agent.account_id == account_id,
+            Agent.owner_user_id == user_id,
+        ).count(),
+    }
+
+    # Candidate dropdown: every other member of the account, with
+    # their current role so the UI can render the promotion-warning
+    # preview.
+    members = (
+        db.query(AccountMembership, User)
+        .join(User, User.id == AccountMembership.user_id)
+        .filter(
+            AccountMembership.account_id == account_id,
+            AccountMembership.user_id != user_id,
+        )
+        .all()
+    )
+    target_members = [
+        {"user_id": u.id, "email": u.email, "role": m.role}
+        for m, u in members
+    ]
+
+    # Default target: the oldest non-disabled account-admin that
+    # isn't the departing user.
+    default_target = None
+    for m in target_members:
+        if m["role"] == "account-admin":
+            default_target = m
+            break
+
+    return {**counts, "default_target": default_target,
+            "target_members": target_members}
 
 
 def update_membership_role(

@@ -39,6 +39,8 @@ from ..schemas import (
     MembershipResponse,
     MembershipRoleUpdateRequest,
     PendingMembershipResponse,
+    RemovalPreviewResponse,
+    RemovalPreviewTarget,
 )
 
 _log = get_logger("mcp.accounts.router")
@@ -335,12 +337,58 @@ def remove_member(
 
     try:
         removed = acct_svc.remove_membership(
-            db, account_id=account_id, user_id=user_id
+            db, account_id=account_id, user_id=user_id,
+            new_owner_id=new_owner_id,
         )
     except acct_svc.LastAdminError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
     if not removed:
         raise HTTPException(status_code=404, detail="Membership not found")
+
+
+@router.get(
+    "/{account_id}/members/{user_id}/removal-preview",
+    response_model=RemovalPreviewResponse,
+)
+def removal_preview(
+    account_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """Wave 9.6: dialog payload for the membership-removal flow.
+
+    Returns owned-row counts + candidate target list (everyone else
+    in the account) with their current roles so the Web UI can
+    render the exact promotion transition ("Promote bob@x.com from
+    viewer → contributor") when the operator picks a target.
+    """
+    if acct_svc.get_account(db, account_id) is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if acct_svc.get_membership(
+        db, account_id=account_id, user_id=user_id
+    ) is None:
+        raise HTTPException(status_code=404, detail="Membership not found")
+
+    preview = acct_svc.describe_removal(
+        db, account_id=account_id, user_id=user_id
+    )
+    return RemovalPreviewResponse(
+        owns_skills=preview["owns_skills"],
+        owns_skillsets=preview["owns_skillsets"],
+        owns_agents=preview["owns_agents"],
+        default_target=(
+            RemovalPreviewTarget(**preview["default_target"])
+            if preview["default_target"] else None
+        ),
+        target_members=[
+            RemovalPreviewTarget(**m) for m in preview["target_members"]
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -450,3 +450,21 @@ class ShareResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Membership-removal preview (Wave 9.6)
+# ---------------------------------------------------------------------------
+
+class RemovalPreviewTarget(BaseModel):
+    user_id: str
+    email: str
+    role: str
+
+
+class RemovalPreviewResponse(BaseModel):
+    owns_skills: int
+    owns_skillsets: int
+    owns_agents: int
+    default_target: RemovalPreviewTarget | None = None
+    target_members: list[RemovalPreviewTarget] = []
