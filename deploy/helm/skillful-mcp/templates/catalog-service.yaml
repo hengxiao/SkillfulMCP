@@ -1,0 +1,20 @@
+{{- if .Values.catalog.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skillful-mcp.catalog.fullname" . }}
+  labels:
+    {{- include "skillful-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: catalog
+spec:
+  type: {{ .Values.catalog.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.catalog.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: {{ include "skillful-mcp.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: catalog
+{{- end -}}

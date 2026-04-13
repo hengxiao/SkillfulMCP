@@ -1,0 +1,70 @@
+# Local dev stack: catalog + webui + Postgres.
+#
+#   make docker-up           # foreground
+#   make docker-up-detach    # background
+#   make docker-down         # stop + remove
+#
+# Credentials are intentionally hard-coded for the dev profile — this
+# file never runs in production. For staging / prod, generate a fresh
+# docker-compose.<env>.yml that pulls from a secret manager.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mcp
+      POSTGRES_PASSWORD: mcp
+      POSTGRES_DB: mcp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp -d mcp"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  catalog:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.catalog
+    image: skillful-mcp/catalog:dev
+    ports:
+      - "8000:8000"
+    environment:
+      # Change these before exposing the stack beyond localhost.
+      MCP_JWT_SECRET: "dev-only-jwt-secret-please-rotate"
+      MCP_ADMIN_KEY: "dev-only-admin-key"
+      MCP_DATABASE_URL: "postgresql://mcp:mcp@postgres:5432/mcp"
+      MCP_MAX_TOKEN_LIFETIME_SECONDS: "3600"
+      MCP_LOG_LEVEL: "INFO"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  webui:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.webui
+    image: skillful-mcp/webui:dev
+    ports:
+      - "8080:8080"
+    environment:
+      MCP_SERVER_URL: "http://catalog:8000"
+      MCP_ADMIN_KEY: "dev-only-admin-key"
+      # Rotate this before shipping — it signs the session cookie.
+      MCP_WEBUI_SESSION_SECRET: "dev-only-session-secret-please-rotate"
+      # No operators by default — set this via docker-compose override
+      # to enable login. Run once to generate a hash:
+      #   docker run --rm skillful-mcp/webui:dev \
+      #     python -c "from webui.auth import hash_password; print(hash_password('mypassword'))"
+      MCP_WEBUI_OPERATORS: "[]"
+    depends_on:
+      catalog:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg_data:

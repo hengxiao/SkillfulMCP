@@ -1,0 +1,150 @@
+## Default values for skillful-mcp.
+##
+## Override at install time:
+##   helm install mcp deploy/helm/skillful-mcp -f my-values.yaml
+##
+## Secrets (MCP_JWT_SECRET, MCP_ADMIN_KEY, MCP_WEBUI_SESSION_SECRET,
+## operator password hashes, DB credentials) must NEVER be committed in
+## values.yaml. Point `.Values.existingSecret` at an in-cluster Secret
+## managed by External Secrets / SealedSecrets / your cloud's KMS.
+
+# ---- Images ----------------------------------------------------------------
+image:
+  registry: ghcr.io
+  repository: hengxiao/skillful-mcp
+  catalogTag: "0.1.0"
+  webuiTag: "0.1.0"
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# ---- Shared settings (mapped to env vars on each pod) ----------------------
+config:
+  # JWT
+  jwtIssuer: "mcp-server"
+  jwtAlgorithm: "HS256"
+  maxTokenLifetimeSeconds: 86400
+  # Rate limit + request size
+  rateLimitPerMinute: 600
+  maxRequestBodyMb: 101
+  # Bundle store
+  bundleStore: "inline"          # "inline" or "s3"
+  bundleS3:
+    bucket: ""
+    prefix: "bundles"
+    region: ""
+    endpointUrl: ""
+  # Logging
+  logLevel: "INFO"
+
+# ---- Secret reference ------------------------------------------------------
+# Name of a Kubernetes Secret that holds the sensitive values. Required
+# keys depend on what components are enabled:
+#   catalog:  MCP_JWT_SECRET, MCP_ADMIN_KEY, (MCP_DATABASE_URL if external)
+#   webui:    MCP_ADMIN_KEY, MCP_WEBUI_SESSION_SECRET, MCP_WEBUI_OPERATORS
+# The chart does NOT create this Secret — operators manage it out-of-band.
+existingSecret: "skillful-mcp-secrets"
+
+# ---- Catalog ---------------------------------------------------------------
+catalog:
+  enabled: true
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # Extra env variables. Use for things like an external MCP_DATABASE_URL
+  # pulled from a different Secret / ConfigMap than `existingSecret`.
+  extraEnv: []
+    # - name: MCP_DATABASE_URL
+    #   valueFrom:
+    #     secretKeyRef:
+    #       name: pg-credentials
+    #       key: url
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+# ---- Web UI ----------------------------------------------------------------
+webui:
+  enabled: true
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+  hpa:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+# ---- Ingress ---------------------------------------------------------------
+# Single Ingress that routes:
+#   /     → webui (8080)
+#   /api/ → catalog (8000)  (path rewritten to `/`)
+#
+# Production setups typically put the catalog behind its own Ingress with
+# stricter auth (mTLS / private ingress class), since agents call it
+# directly. The shared-ingress pattern here is the simplest path to a
+# working demo.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/rewrite-target: /$2
+  host: "mcp.example.com"
+  tls:
+    enabled: false
+    secretName: "mcp-tls"
+
+# ---- Service account + RBAC -----------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---- Pod security ----------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10000
+  runAsGroup: 10000
+  fsGroup: 10000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

@@ -1,0 +1,46 @@
+SkillfulMCP {{ .Chart.AppVersion }} has been deployed as {{ .Release.Name }}.
+
+Required Secret
+---------------
+This chart does NOT create the Secret that holds sensitive values; you
+must manage it yourself (External Secrets / SealedSecrets / your cloud
+KMS). The chart expects a Secret named:
+
+  {{ .Values.existingSecret }}
+
+with the following keys:
+  MCP_JWT_SECRET               — JWT signing secret (legacy single-key mode)
+  MCP_ADMIN_KEY                — admin-key for write endpoints (inter-service)
+  MCP_DATABASE_URL             — e.g. postgresql://user:pass@host/db
+  MCP_WEBUI_SESSION_SECRET     — session cookie signing secret
+  MCP_WEBUI_OPERATORS          — JSON array of {email, password_hash}
+
+If you plan to use multi-key JWT rotation, also add MCP_JWT_KEYS +
+MCP_JWT_ACTIVE_KID (see spec/mcp_server/keyring.md).
+
+Access
+------
+{{- if .Values.ingress.enabled }}
+The Web UI is reachable at:
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/
+
+The catalog API is at:
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api/
+{{- else }}
+No Ingress is configured. Port-forward to reach the services:
+
+  kubectl port-forward -n {{ .Release.Namespace }} \
+    svc/{{ include "skillful-mcp.webui.fullname" . }} 8080:{{ .Values.webui.service.port }}
+
+  kubectl port-forward -n {{ .Release.Namespace }} \
+    svc/{{ include "skillful-mcp.catalog.fullname" . }} 8000:{{ .Values.catalog.service.port }}
+{{- end }}
+
+Observability
+-------------
+Catalog logs are JSON to stdout. Each line includes `request_id`,
+matching the `X-Request-ID` header on responses. `/livez` is the
+liveness probe, `/readyz` the readiness probe.
+
+For the full operational runbook see spec/deployment.md in the source
+tree.

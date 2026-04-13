@@ -18,7 +18,9 @@ MESSAGE     ?= My internet has been dropping every night for a week
 
 # ── Phony targets ──────────────────────────────────────────────────────────────
 .PHONY: help install install-examples env serve webui test test-v example \
-        example-anthropic example-openai example-langchain example-langgraph clean
+        example-anthropic example-openai example-langchain example-langgraph clean \
+        docker-build docker-up docker-up-detach docker-down \
+        helm-lint helm-template
 
 # ── Help ───────────────────────────────────────────────────────────────────────
 help:
@@ -39,6 +41,14 @@ help:
 	@echo "  make example-langgraph LangGraph runner"
 	@echo "                         MESSAGE=\"...\" to change the user prompt"
 	@echo "  make clean             Remove build artefacts and temp files"
+	@echo ""
+	@echo "  make docker-build      Build catalog + webui images (skillful-mcp/*:dev)"
+	@echo "  make docker-up         Run the local stack (catalog+webui+postgres) in foreground"
+	@echo "  make docker-up-detach  Same, in background"
+	@echo "  make docker-down       Stop + remove the local stack"
+	@echo ""
+	@echo "  make helm-lint         Lint the Helm chart under deploy/helm/skillful-mcp"
+	@echo "  make helm-template     Render chart locally with stub secret (debugging)"
 	@echo ""
 
 # ── Install ────────────────────────────────────────────────────────────────────
@@ -87,6 +97,27 @@ example-langchain:
 
 example-langgraph:
 	$(PYTHON) -m example.langgraph_app.run_network --message "$(MESSAGE)"
+
+# ── Docker ─────────────────────────────────────────────────────────────────────
+docker-build:
+	docker build -f deploy/Dockerfile.catalog -t skillful-mcp/catalog:dev .
+	docker build -f deploy/Dockerfile.webui   -t skillful-mcp/webui:dev   .
+
+docker-up:
+	docker compose up --build
+
+docker-up-detach:
+	docker compose up --build -d
+
+docker-down:
+	docker compose down -v
+
+# ── Helm ───────────────────────────────────────────────────────────────────────
+helm-lint:
+	helm lint deploy/helm/skillful-mcp
+
+helm-template:
+	helm template mcp deploy/helm/skillful-mcp --set existingSecret=mcp-test
 
 # ── Clean ──────────────────────────────────────────────────────────────────────
 clean:

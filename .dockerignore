@@ -1,0 +1,32 @@
+.git
+.github
+.gitignore
+.venv
+.env
+.env.local
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+*.db
+*.sqlite
+*.sqlite3
+build
+dist
+
+# Test artifacts we don't want in the image.
+tests
+htmlcov
+.coverage*
+
+# Docs and examples — kept out of the production image on purpose.
+spec
+example
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store

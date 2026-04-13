@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast feedback: SQLite tests on 3.11 + 3.12
+  # ---------------------------------------------------------------------------
+  test-sqlite:
+    name: Tests (SQLite, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres,s3,examples]"
+
+      - name: Pytest
+        run: pytest -v
+
+  # ---------------------------------------------------------------------------
+  # Postgres matrix: same suite, against real Postgres. Catches dialect drift
+  # and any ondelete=CASCADE assumptions that SQLite silently tolerates.
+  # ---------------------------------------------------------------------------
+  test-postgres:
+    name: Tests (Postgres 16)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mcp
+          POSTGRES_PASSWORD: mcp
+          POSTGRES_DB: mcp
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U mcp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Pytest (Postgres-gated tests run; default tests still SQLite)
+        env:
+          MCP_TEST_POSTGRES_URL: postgresql://mcp:mcp@localhost:5432/mcp
+        run: pytest -v
+
+  # ---------------------------------------------------------------------------
+  # Lint: ruff only for now. `mypy` will come with a dedicated typing pass.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff check
+        # Soft-fail for now — ruff has many default rules the prototype
+        # codebase didn't target. A follow-up wave tightens config.
+        run: ruff check . || true
+
+  # ---------------------------------------------------------------------------
+  # Docker: verify both images build. No push — that's a separate release job.
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (catalog + webui)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build catalog
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.catalog
+          push: false
+          load: true
+          tags: skillful-mcp/catalog:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build webui
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.webui
+          push: false
+          load: true
+          tags: skillful-mcp/webui:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Helm lint: catches indentation + schema issues without a live cluster.
+  # ---------------------------------------------------------------------------
+  helm-lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.14.0"
+      - run: helm lint deploy/helm/skillful-mcp
+      - name: Render with sane defaults
+        # Render with an `existingSecret` stub so `required` passes.
+        run: helm template mcp deploy/helm/skillful-mcp --set existingSecret=mcp-test

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: skillful-mcp
+description: |
+  SkillfulMCP — JWT-based skill authorization server with an operator Web UI.
+  See spec/deployment.md for the operational runbook.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.26.0-0"
+keywords:
+  - mcp
+  - llm
+  - agents
+  - skills
+sources:
+  - https://github.com/hengxiao/SkillfulMCP
+maintainers:
+  - name: SkillfulMCP maintainers

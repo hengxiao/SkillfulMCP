@@ -106,8 +106,13 @@ imagine running it in production.
   ran the `uvicorn` command.
 - **No health readiness/liveness distinction.** `GET /health` reports
   "alive" with no check on DB connectivity, JWT secret presence, or disk.
-- **No deployment artifacts.** No Dockerfile, no Helm chart, no Terraform,
-  no CI pipeline that builds one.
+- **~~No deployment artifacts.~~** **Addressed in Wave 7.**
+  `deploy/Dockerfile.{catalog,webui}` (multi-stage, non-root),
+  `docker-compose.yml` for the local dev stack, `deploy/helm/skillful-mcp/`
+  (Chart v0.1.0: Deployments, Services, Ingress, HPAs, PDBs,
+  ConfigMap, security contexts), and `.github/workflows/ci.yml`
+  (SQLite + Postgres test matrix, image build, Helm lint).
+  See `spec/deployment.md` for the runbook.
 - **`.env`-based config** with no hierarchy (env > file), no typed schema
   checked at startup, no secret-manager integration.
 
@@ -335,17 +340,25 @@ order.
 
 ### 3.7 Deployment / packaging
 
-- **[P0] Dockerfile** (multi-stage, slim runtime, non-root user). One
-  image per service (`catalog`, `webui`). Pinned Python, pinned deps via
-  `pip-tools` or `uv lock`. Deliverable: `docker build && docker run`
-  boots a healthy instance.
-- **[P0] Helm chart** (or equivalent Kustomize / Pulumi / CDK) with:
-  - Deployment + HPA on CPU and request latency.
-  - Service + Ingress (TLS via cert-manager).
-  - ConfigMap for non-secret settings, External Secrets for the rest.
-  - PodDisruptionBudget, liveness/readiness, resource requests.
-- **[P0] CI pipeline** (GitHub Actions): lint, type check (`mypy`),
-  tests, build image, push to registry, deploy to staging on merge.
+- **[P0 — SHIPPED] Dockerfile.** `deploy/Dockerfile.catalog` and
+  `deploy/Dockerfile.webui`, both multi-stage (builder → slim runtime),
+  both running as `uid 10000` non-root, both with `HEALTHCHECK`s. Pinned
+  Python 3.12 base. `.dockerignore` excludes tests, specs, examples,
+  caches. `docker-compose.yml` wires catalog + webui + Postgres with
+  healthchecks for the local-dev stack.
+- **[P0 — SHIPPED (chart); external-secrets integration pending] Helm
+  chart.** `deploy/helm/skillful-mcp/`. Deployment + HPA (CPU) + PDB per
+  service; ConfigMap for non-secret env; optional Ingress (`/` → webui,
+  `/api/*` → catalog); pod + container security contexts with
+  `readOnlyRootFilesystem`. The Secret holding sensitive values is
+  **not** chart-managed — operators provision it out of band
+  (External Secrets / SealedSecrets / cloud KMS). That integration
+  template is tracked as follow-up.
+- **[P0 — partially SHIPPED] CI pipeline.**
+  `.github/workflows/ci.yml`: lint (ruff, soft-fail), SQLite test matrix
+  (py3.11 + py3.12), Postgres 16 test job, Docker build for both images
+  (cache via GHA), `helm lint` + dry-render. **Still TODO**: mypy pass,
+  image push to registry on release, automated staging deploy on merge.
 - **[P1] Blue/green deploy** with automated rollback on SLO burn.
 - **[P1] Secrets** via AWS Secrets Manager / GCP Secret Manager /
   External Secrets Operator. No secrets in container env at build time.

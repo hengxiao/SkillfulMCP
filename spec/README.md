@@ -26,6 +26,7 @@ Implementation (high-level):
 - `example-frameworks.md` — how Anthropic SDK / OpenAI / LangChain / LangGraph / Cursor consume the catalog; layout of the per-framework runners under `example/`.
 - `productization.md` — gap analysis and action plan for turning the prototype into a deployable, multi-tenant cloud service (identity, storage, scaling, observability, rollout milestones).
 - `migrations.md` — Alembic workflow: when migrations run, how to create and review them, conventions, and the Postgres dev/test story.
+- `deployment.md` — Dockerfiles, docker-compose local stack, Helm chart, GitHub Actions CI, operational runbook (Wave 7).
 
 Per-submodule specs (implementation-level, one file per source module):
 

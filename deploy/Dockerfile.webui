@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1.7
+#
+# SkillfulMCP Web UI.
+#
+# Ships the same wheel as the catalog image (see Dockerfile.catalog for
+# rationale) — `webui` and `mcp_server` are declared in the same
+# pyproject.toml and the size cost is marginal. If this ever becomes an
+# issue, split into `[webui]` and `[catalog]` optional extras and install
+# only the needed one per image.
+#
+# Build from the repo root:
+#   docker build -f deploy/Dockerfile.webui -t skillful-mcp/webui:dev .
+
+ARG PYTHON_VERSION=3.12
+
+# -----------------------------------------------------------------------------
+# Stage 1 — builder
+# -----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /build
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY mcp_server/ mcp_server/
+COPY webui/ webui/
+COPY cli/ cli/
+
+RUN python -m venv /venv \
+ && /venv/bin/pip install --upgrade pip \
+ && /venv/bin/pip install "."
+
+# -----------------------------------------------------------------------------
+# Stage 2 — runtime
+# -----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/venv/bin:${PATH}" \
+    WEBUI_HOST=0.0.0.0 \
+    WEBUI_PORT=8080
+
+RUN groupadd --system --gid 10000 mcp \
+ && useradd  --system --uid 10000 --gid 10000 --home-dir /app --shell /usr/sbin/nologin mcp
+
+WORKDIR /app
+
+COPY --from=builder /venv /venv
+COPY --from=builder /build/mcp_server /app/mcp_server
+COPY --from=builder /build/webui /app/webui
+
+RUN chown -R mcp:mcp /app
+
+USER mcp
+
+EXPOSE 8080
+
+# The Web UI has no /livez; a GET /login (always 200, bypasses the auth
+# middleware) is the simplest liveness check.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/login', timeout=3)" || exit 1
+
+ENTRYPOINT ["uvicorn", "webui.main:create_app", "--factory"]
+CMD ["--host", "0.0.0.0", "--port", "8080"]

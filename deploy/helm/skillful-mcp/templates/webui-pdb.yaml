@@ -1,0 +1,16 @@
+{{- if and .Values.webui.enabled .Values.webui.pdb.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "skillful-mcp.webui.fullname" . }}
+  labels:
+    {{- include "skillful-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+spec:
+  minAvailable: {{ .Values.webui.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "skillful-mcp.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: webui
+{{- end -}}

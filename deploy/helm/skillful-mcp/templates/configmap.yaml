@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skillful-mcp.fullname" . }}-config
+  labels:
+    {{- include "skillful-mcp.labels" . | nindent 4 }}
+data:
+  # Non-sensitive env shared by both deployments. Secrets live in
+  # `.Values.existingSecret` (a Secret the operator manages out-of-band).
+  MCP_JWT_ISSUER: {{ .Values.config.jwtIssuer | quote }}
+  MCP_JWT_ALGORITHM: {{ .Values.config.jwtAlgorithm | quote }}
+  MCP_MAX_TOKEN_LIFETIME_SECONDS: {{ .Values.config.maxTokenLifetimeSeconds | quote }}
+  MCP_RATE_LIMIT_PER_MINUTE: {{ .Values.config.rateLimitPerMinute | quote }}
+  MCP_MAX_REQUEST_BODY_MB: {{ .Values.config.maxRequestBodyMb | quote }}
+  MCP_BUNDLE_STORE: {{ .Values.config.bundleStore | quote }}
+  MCP_BUNDLE_S3_BUCKET: {{ .Values.config.bundleS3.bucket | quote }}
+  MCP_BUNDLE_S3_PREFIX: {{ .Values.config.bundleS3.prefix | quote }}
+  MCP_BUNDLE_S3_REGION: {{ .Values.config.bundleS3.region | quote }}
+  MCP_BUNDLE_S3_ENDPOINT_URL: {{ .Values.config.bundleS3.endpointUrl | quote }}
+  MCP_LOG_LEVEL: {{ .Values.config.logLevel | quote }}

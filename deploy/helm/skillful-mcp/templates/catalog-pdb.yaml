@@ -1,0 +1,16 @@
+{{- if and .Values.catalog.enabled .Values.catalog.pdb.enabled -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "skillful-mcp.catalog.fullname" . }}
+  labels:
+    {{- include "skillful-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: catalog
+spec:
+  minAvailable: {{ .Values.catalog.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "skillful-mcp.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: catalog
+{{- end -}}

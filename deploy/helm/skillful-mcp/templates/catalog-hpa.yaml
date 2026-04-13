@@ -1,0 +1,23 @@
+{{- if and .Values.catalog.enabled .Values.catalog.hpa.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "skillful-mcp.catalog.fullname" . }}
+  labels:
+    {{- include "skillful-mcp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: catalog
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "skillful-mcp.catalog.fullname" . }}
+  minReplicas: {{ .Values.catalog.hpa.minReplicas }}
+  maxReplicas: {{ .Values.catalog.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.catalog.hpa.targetCPUUtilizationPercentage }}
+{{- end -}}

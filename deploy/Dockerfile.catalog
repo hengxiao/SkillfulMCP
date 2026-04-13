@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1.7
+#
+# SkillfulMCP catalog service.
+#
+# Multi-stage:
+#   1. `builder`  — compiles wheels for the project and its runtime deps.
+#   2. `runtime`  — slim image containing only the installed wheels + source,
+#                   running as a non-root user.
+#
+# Build from the repo root:
+#   docker build -f deploy/Dockerfile.catalog -t skillful-mcp/catalog:dev .
+
+ARG PYTHON_VERSION=3.12
+
+# -----------------------------------------------------------------------------
+# Stage 1 — builder
+# -----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /build
+
+# Build tools for any deps that ship only sdists (e.g. bcrypt wheels on
+# older glibc). Slim base needs them explicitly.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+# Copy only the files needed to resolve deps first so this layer caches
+# across source-only changes.
+COPY pyproject.toml README.md ./
+COPY mcp_server/ mcp_server/
+COPY webui/ webui/
+COPY cli/ cli/
+COPY migrations/ migrations/
+COPY alembic.ini ./
+
+# Install the package + postgres driver into a local venv so the runtime
+# image can just copy it wholesale (no pip needed at runtime).
+RUN python -m venv /venv \
+ && /venv/bin/pip install --upgrade pip \
+ && /venv/bin/pip install ".[postgres]"
+
+# -----------------------------------------------------------------------------
+# Stage 2 — runtime
+# -----------------------------------------------------------------------------
+FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/venv/bin:${PATH}" \
+    MCP_LOG_LEVEL=INFO
+
+# Non-root user. uid 10000 avoids colliding with common host uids.
+RUN groupadd --system --gid 10000 mcp \
+ && useradd  --system --uid 10000 --gid 10000 --home-dir /app --shell /usr/sbin/nologin mcp
+
+WORKDIR /app
+
+COPY --from=builder /venv /venv
+COPY --from=builder /build/mcp_server /app/mcp_server
+COPY --from=builder /build/webui /app/webui
+COPY --from=builder /build/cli /app/cli
+COPY --from=builder /build/migrations /app/migrations
+COPY --from=builder /build/alembic.ini /app/alembic.ini
+
+RUN chown -R mcp:mcp /app
+
+USER mcp
+
+EXPOSE 8000
+
+# Healthcheck hits /livez — always-200 if the worker is up. Readiness is
+# /readyz but that fails when the DB is down, which from Docker's
+# perspective is "unhealthy" too aggressively.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/livez', timeout=3)" || exit 1
+
+# `--factory` because mcp_server.main exposes a create_app() factory.
+# Workers: match the container's CPU request — operators override at
+# deploy time via `command:` in their own pod spec.
+ENTRYPOINT ["uvicorn", "mcp_server.main:create_app", "--factory"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
