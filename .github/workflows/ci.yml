@@ -91,9 +91,11 @@ jobs:
       - name: Install ruff
         run: pip install ruff
       - name: Ruff check
-        # Soft-fail for now — ruff has many default rules the prototype
-        # codebase didn't target. A follow-up wave tightens config.
-        run: ruff check . || true
+        # Hard-fail as of the Wave 9.1 cleanup pass (commit ee54659).
+        # The codebase exits clean with default rules; any new F401 /
+        # F841 / E702 regression blocks the merge. Rule tightening
+        # (line length, import sort, naming) is a follow-up wave.
+        run: ruff check .
 
   # ---------------------------------------------------------------------------
   # Docker: verify both images build. No push — that's a separate release job.

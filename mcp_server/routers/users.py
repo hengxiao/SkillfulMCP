@@ -21,7 +21,6 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from .. import accounts as acct_svc
 from .. import users as user_svc
 from ..dependencies import get_db, require_admin
 from ..logging_config import get_logger
@@ -30,8 +29,6 @@ from ..pwhash import hash_password, verify_password
 from ..schemas import (
     AuthenticateResponse,
     DisableUserRequest,
-    SignupRequest,
-    SignupResponse,
     UserAuthenticateRequest,
     UserCreate,
     UserResponse,
