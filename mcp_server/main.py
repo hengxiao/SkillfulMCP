@@ -26,6 +26,7 @@ from .routers import (
     agents,
     bundles,
     health,
+    move_account as move_account_router,
     shares as shares_router,
     signup as signup_router,
     skills,
@@ -127,6 +128,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.include_router(accounts_router.router)
     app.include_router(signup_router.router)
     app.include_router(shares_router.router)
+    app.include_router(move_account_router.router)
 
     return app
 
