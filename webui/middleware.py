@@ -46,8 +46,9 @@ def require_role(*allowed: str):
 
 # Paths that never require a session. Keep this tight.
 _DEFAULT_AUTH_EXEMPT: frozenset[str] = frozenset({
+    "/",          # public landing — shows public skills + skillsets
     "/login",
-    "/logout",  # harmless to allow unauth'd; it's a no-op
+    "/logout",    # harmless to allow unauth'd; it's a no-op
     "/favicon.ico",
 })
 

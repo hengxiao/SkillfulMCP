@@ -168,20 +168,38 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------ #
 
     @app.get("/", response_class=HTMLResponse)
-    async def dashboard(request: Request, msg: str = "", msg_type: str = "success"):
+    async def landing(request: Request, msg: str = "", msg_type: str = "success"):
+        """Public landing page.
+
+        Anonymous visitors see only public skills + skillsets — it's a
+        read-only browse of the open catalog. Logged-in operators see
+        the same list plus counts across everything (as before).
+        """
         client = get_client()
+        op = get_session_operator(request)
         try:
-            skillsets = await client.list_skillsets()
-            skills = await client.list_skills()
-            agents = await client.list_agents()
+            all_skills = await client.list_skills()
+            all_skillsets = await client.list_skillsets()
             error = None
         except MCPError as exc:
-            skillsets, skills, agents = [], [], []
-            error = str(exc)
-        return _render(request, "dashboard.html", {
+            all_skills, all_skillsets, error = [], [], str(exc)
+
+        public_skills = [s for s in all_skills if s.get("visibility") == "public"]
+        public_skillsets = [s for s in all_skillsets if s.get("visibility") == "public"]
+
+        agents = []
+        if op is not None:
+            try:
+                agents = await client.list_agents()
+            except MCPError:
+                agents = []
+
+        return _render(request, "landing.html", {
             "active": "dashboard",
-            "skillsets_count": len(skillsets),
-            "skills_count": len(skills),
+            "public_skills": public_skills,
+            "public_skillsets": public_skillsets,
+            "skillsets_count": len(all_skillsets),
+            "skills_count": len(all_skills),
             "agents_count": len(agents),
             "error": error,
             **_flash_ctx(msg, msg_type),

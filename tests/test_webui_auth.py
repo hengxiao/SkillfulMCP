@@ -181,8 +181,16 @@ class TestLogin:
 
 
 class TestAuthRedirect:
-    def test_unauth_gets_redirected_to_login(self, app_client):
+    def test_unauth_root_is_public_landing(self, app_client):
+        # `/` is the public catalog landing page — served to anyone, with
+        # a "Sign in" button in place of the operator-only links.
         r = app_client.get("/", follow_redirects=False)
+        assert r.status_code == 200
+        assert b"Public catalog" in r.content
+        assert b"Sign in" in r.content
+
+    def test_unauth_guarded_path_redirects(self, app_client):
+        r = app_client.get("/skills", follow_redirects=False)
         assert r.status_code == 303
         assert r.headers["location"].startswith("/login?next=")
 
@@ -214,8 +222,8 @@ class TestLogout:
         r = app_client.post("/logout", follow_redirects=False)
         assert r.status_code == 303
         assert r.headers["location"] == "/login"
-        # Next request is unauthenticated again.
-        r2 = app_client.get("/", follow_redirects=False)
+        # Next request to a guarded path redirects — session is gone.
+        r2 = app_client.get("/skills", follow_redirects=False)
         assert r2.status_code == 303
         assert r2.headers["location"].startswith("/login?next=")
 

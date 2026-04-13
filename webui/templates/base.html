@@ -144,8 +144,9 @@
   </div>
   <nav class="nav flex-column mt-2">
     <a class="nav-link {% if active == 'dashboard' %}active{% endif %}" href="/">
-      <i class="bi bi-speedometer2"></i><span>Dashboard</span>
+      <i class="bi bi-globe"></i><span>{% if operator %}Dashboard{% else %}Public catalog{% endif %}</span>
     </a>
+    {% if operator %}
     <a class="nav-link {% if active == 'skillsets' %}active{% endif %}" href="/skillsets">
       <i class="bi bi-collection"></i><span>Skillsets</span>
     </a>
@@ -155,7 +156,7 @@
     <a class="nav-link {% if active == 'agents' %}active{% endif %}" href="/agents">
       <i class="bi bi-robot"></i><span>Agents</span>
     </a>
-    {% if operator and operator.role == 'admin' %}
+    {% if operator.role == 'admin' %}
     <a class="nav-link {% if active == 'users' %}active{% endif %}" href="/users">
       <i class="bi bi-people"></i><span>Users</span>
     </a>
@@ -163,6 +164,7 @@
     <a class="nav-link {% if active == 'account' %}active{% endif %}" href="/account">
       <i class="bi bi-person-gear"></i><span>Account</span>
     </a>
+    {% endif %}
   </nav>
   <div class="sidebar-footer">
     {% if operator %}
@@ -178,7 +180,10 @@
       </form>
       <div class="mt-2 small" style="opacity: .4;">v0.1.0 prototype</div>
     {% else %}
-      v0.1.0 prototype
+      <a href="/login" class="btn btn-sm btn-outline-light w-100 mb-2">
+        <i class="bi bi-box-arrow-in-right me-1"></i>Sign in
+      </a>
+      <div class="small" style="opacity: .4;">v0.1.0 prototype</div>
     {% endif %}
   </div>
 </aside>
